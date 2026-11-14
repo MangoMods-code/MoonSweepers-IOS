@@ -28,6 +28,7 @@ final class GameViewController: UIViewController {
     private var jumpHeld = false
     private var jumpQueued = false
     private var hapticTimer: Float = 0
+    private var lastAim: SIMD2<Float>?
     private var nightTipShown = false
     private var tipCooldown: Float = 0
     private var nightVisionOn = false
@@ -82,8 +83,7 @@ final class GameViewController: UIViewController {
         view.backgroundColor = .black
 
         let loaded = SaveManager.load()
-        let n = DustField.res
-        dust = DustField(savedMask: loaded != nil ? SaveManager.loadMask(expectedCount: n * n) : nil)
+        dust = DustField(savedBits: loaded != nil ? SaveManager.loadBits() : nil)
         world = MoonWorld(scene: scene, dust: dust)
         structures = Structures(world: world)
         scene.rootNode.addChildNode(structures.root)
@@ -989,7 +989,7 @@ final class GameViewController: UIViewController {
             if abs(v.speed) > 0.3 {
                 if left > 0.01 {
                     let c = v.brushCenter
-                    got = dust.clean(atX: c.x, z: c.z, radius: v.tier.width / 2, rate: 3.5, dt: dt, capacityLeft: left)
+                    got = dust.clean(atX: c.x, z: c.z, radius: v.tier.width / 2, capacityLeft: left)
                     save.vehicleLoad += got
                 } else if tipCooldown <= 0 {
                     toast("Hopper full — drive to a DEPOT and tap UNLOAD.")
@@ -1008,7 +1008,7 @@ final class GameViewController: UIViewController {
 
             let radius = save.toolRadius
             let cap = save.toolCapacity
-            if let aim = player.aimPoint(world: world, reach: save.tool.reach) {
+            if let aim = player.aimPoint(world: world, reach: save.toolReach) {
                 aimRing.isHidden = false
                 aimRing.simdPosition = aim + SIMD3<Float>(0, 0.07, 0)
                 let ringR = radius + 0.1
@@ -1030,7 +1030,11 @@ final class GameViewController: UIViewController {
                     }
                     let left = cap - save.toolLoad
                     if left > 0.001 {
-                        let got = dust.clean(atX: aim.x, z: aim.z, radius: radius, rate: save.toolRate, dt: dt, capacityLeft: left)
+                        let here = SIMD2<Float>(aim.x, aim.z)
+                        var from = here
+                        if let last = lastAim, simd_length(last - here) < 2.5 { from = last }
+                        lastAim = here
+                        let got = dust.cleanStroke(from: from, to: here, radius: radius, capacityLeft: left)
                         if got > 0 {
                             collecting = true
                             save.toolLoad += got
@@ -1044,6 +1048,7 @@ final class GameViewController: UIViewController {
             } else {
                 aimRing.isHidden = true
             }
+            if !scrubHeld { lastAim = nil }
             brushPuff.birthRate = collecting ? CGFloat(40 + radius * 160) : 0
             aimRing.isHidden = aimRing.isHidden || !save.hasTool
             player.animateTool(dt: dt, scrubbing: scrubHeld && save.hasTool)

@@ -105,7 +105,7 @@ final class SweepBot {
         case .cleaning:
             let fx = position.x - sin(heading) * (kind == .vacuum ? 0.4 : 1.6)
             let fz = position.z - cos(heading) * (kind == .vacuum ? 0.4 : 1.6)
-            let got = dust.clean(atX: fx, z: fz, radius: cleanRadius, rate: cleanRate, dt: dt, capacityLeft: capacity - load)
+            let got = dust.clean(atX: fx, z: fz, radius: cleanRadius, capacityLeft: capacity - load)
             load += got
             dustPuff.birthRate = got > 0 ? (kind == .vacuum ? 30 : 140) : 0
             if load >= capacity - 0.01 {

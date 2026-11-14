@@ -45,7 +45,7 @@ enum Catalog {
 
     static let compactor = Perk(name: "Dust Compactor", detail: "+20% tool container per level.", costs: [20, 50, 120, 300, 700])
     static let wideHeads = Perk(name: "Wide Heads", detail: "+15% tool width per level.", costs: [30, 80, 200, 500, 1200])
-    static let bristles = Perk(name: "Stiff Bristles", detail: "+20% cleaning speed per level.", costs: [25, 60, 150, 400, 900])
+    static let bristles = Perk(name: "Long Handles", detail: "+0.6 m cleaning reach per level.", costs: [25, 60, 150, 400, 900])
     static let jetTanks = Perk(name: "Jetpack Tanks", detail: "+2s of jetpack fuel per level.", costs: [120, 400, 1200])
     static let lampLens = Perk(name: "Helmet Lamp Lens", detail: "Brighter, wider helmet lamp.", costs: [40, 160])
     static let autoPacker = Perk(name: "Auto Packer", detail: "Packs a capsule automatically when your tool is full.", costs: [150])
@@ -144,7 +144,7 @@ struct SaveData: Codable {
     var tool: HandTool { Catalog.tools[max(0, currentTool)] }
     var toolCapacity: Float { tool.capacity * (1 + 0.2 * Float(compactor)) }
     var toolRadius: Float { tool.width / 2 * (1 + 0.15 * Float(wideHeads)) }
-    var toolRate: Float { tool.rate * (1 + 0.2 * Float(bristles)) }
+    var toolReach: Float { tool.reach + 0.6 * Float(bristles) }
     var capsuleCapacity: Float { Catalog.capsuleSizes[min(capsuleSize, Catalog.capsuleSizes.count - 1)] }
     var moveSpeed: Float { hasBoots ? 5.2 : 3.4 }
     var jetFuel: Float { hasJetpack ? 2.5 + 2 * Float(jetTanks) : 0 }
@@ -163,11 +163,11 @@ struct SaveData: Codable {
 
 enum SaveManager {
     private static let ioQueue = DispatchQueue(label: "moonsweepers.save", qos: .utility)
-    private static let key = "moonsweepers.save.v3"
+    private static let key = "moonsweepers.save.v4"
 
     private static var maskURL: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("dustmask-v3.bin")
+        return dir.appendingPathComponent("dustbits-v4.bin")
     }
 
     static var hasSave: Bool { UserDefaults.standard.data(forKey: key) != nil }
@@ -177,9 +177,8 @@ enum SaveManager {
         return try? JSONDecoder().decode(SaveData.self, from: data)
     }
 
-    static func loadMask(expectedCount: Int) -> [UInt8]? {
-        guard let data = try? Data(contentsOf: maskURL), data.count == expectedCount else { return nil }
-        return [UInt8](data)
+    static func loadBits() -> Data? {
+        try? Data(contentsOf: maskURL)
     }
 
     static func save(_ s: SaveData, mask: [UInt8]) {
@@ -189,7 +188,7 @@ enum SaveManager {
         // The dust mask is a few MB, so write it off the main thread.
         let url = maskURL
         ioQueue.async {
-            try? Data(mask).write(to: url, options: .atomic)
+            try? DustField.pack(mask).write(to: url, options: .atomic)
         }
     }
 
