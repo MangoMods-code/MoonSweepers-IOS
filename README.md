@@ -1,6 +1,6 @@
 # Moon Sweepers — iOS mockup
 
-First-person (no hands) iOS mockup of Moon Sweepers, written in Swift + SceneKit. Everything — models, textures, sky and sound — is generated in code; no assets from the PC game are included.
+First-person (no hands) iOS mockup of Moon Sweepers, written in Swift + SceneKit. Terrain, textures, sky and sound are generated in code. Rocks, the garage, consoles, dishes and other props use Kenney's **Space Kit** (CC0, www.kenney.nl — licence in `Assets/Models`). No assets from the PC game are included.
 
 ## What's in it
 - **You start inside N Station** with nothing: take the free Toothbrush from the Supply Wall, walk out the door and start sweeping. Nothing else stands on the Moon until you build it.

@@ -45,7 +45,7 @@ final class Structures {
         return m
     }()
     private let plateOrange: SCNMaterial = {
-        let m = Mat.solid(UIColor(red: 0.96, green: 0.46, blue: 0.10, alpha: 1))
+        let m = Mat.solid(Kit.orange)
         m.isDoubleSided = true
         return m
     }()
@@ -90,6 +90,7 @@ final class Structures {
     private func buildStation(_ i: Int, at p: SIMD3<Float>, world: MoonWorld) {
         let shell = SCNNode()
         let signs = SCNNode()
+        let signsLit = SCNNode()
         let H: Float = 4.2
         func put(_ g: SCNGeometry, _ m: SCNMaterial, _ x: Float, _ y: Float, _ z: Float) {
             shell.addChildNode(Make.part(g, m, x, y, z))
@@ -114,6 +115,9 @@ final class Structures {
         put(Make.box(0.25, 3.0, 0.4, chamfer: 0.02), Mat.orange, 1.72, 1.6, 5)
         // Roof, launcher and mast.
         put(Make.box(14.8, 0.3, 10.8, chamfer: 0.05), Mat.offWhite, 0, H + 0.24, 0)
+        put(Make.archRoof(width: 15.2, length: 11.2, rise: 2.5), plateOrange, 0, H + 0.38, 0)
+        put(Make.archRoof(width: 15.36, length: 1.3, rise: 2.58), plateWhite, 0, H + 0.38, 3.4)
+        put(Make.archRoof(width: 15.36, length: 0.5, rise: 2.58), plateWhite, 0, H + 0.38, -4.2)
         put(SCNCylinder(radius: 0.5, height: 4), Mat.white, 5.7, H + 2.3, -3.7)
         for y in [0.9, 2.2, 3.5] {
             put(SCNTube(innerRadius: 0.5, outerRadius: 0.56, height: 0.3), Mat.orange, 5.7, H + 0.3 + Float(y), -3.7)
@@ -197,8 +201,32 @@ final class Structures {
         inside.eulerAngles.y = .pi
         signs.addChildNode(inside)
 
+        // Space Kit dressing: dish outside, consoles and barrels inside.
+        if let dish = Kit.make("satelliteDishLarge", fit: 2.8) {
+            dish.position = SCNVector3(-8.5, 0.09, 3.2)
+            dish.eulerAngles.y = 2.3
+            signsLit.addChildNode(dish)
+            world.addCollider(x: p.x - 8.5, z: p.z + 3.2, r: 1.2, group: i)
+        }
+        if let c1 = Kit.make("consoleScreen", fit: 1.5) {
+            c1.position = SCNVector3(-4.2, 0.13, -4.3)
+            signsLit.addChildNode(c1)
+        }
+        if let c2 = Kit.make("console", fit: 1.5) {
+            c2.position = SCNVector3(3.4, 0.13, -4.3)
+            signsLit.addChildNode(c2)
+        }
+        for (bx, bz) in [(-6.1, 4.1), (-5.2, 4.3), (-6.2, 3.3)] {
+            if let b = Kit.make("barrel", fit: 0.75) {
+                b.position = SCNVector3(Float(bx), 0.13, Float(bz))
+                signsLit.addChildNode(b)
+            }
+        }
+        world.addCollider(x: p.x - 5.8, z: p.z + 3.9, r: 0.9, group: i)
+
         let flat = shell.flattenedClone()
         add(flat, at: p)
+        add(signsLit, at: p)
         Make.noShadows(signs)
         add(signs, at: p)
 
@@ -222,7 +250,7 @@ final class Structures {
         beacons.append(beacon)
         Make.noShadows(extras)
         add(extras, at: p)
-        stationNodes.append([flat, signs, extras])
+        stationNodes.append([flat, signs, signsLit, extras])
 
         // Collision.
         let o = SIMD2<Float>(p.x, p.z)
@@ -305,13 +333,18 @@ final class Structures {
         packagerNode.addChildNode(belt)
         root.addChildNode(packagerNode)
 
-        let ch = Make.part(SCNCapsule(capRadius: 0.9, height: 3.2), Mat.white, 0, 1.3, 0)
-        ch.eulerAngles.z = .pi / 2
-        chamberNode.addChildNode(ch)
-        chamberNode.addChildNode(Make.part(Make.box(2.2, 0.5, 1.4, chamfer: 0.05), Mat.dark, 0, 0.25, 0))
-        let band = Make.part(SCNTube(innerRadius: 0.9, outerRadius: 0.96, height: 0.3), Mat.orange, 0, 1.3, 0)
-        band.eulerAngles.z = .pi / 2
-        chamberNode.addChildNode(band)
+        if let tank = Kit.make("barrelLarge", fit: 3.0) {
+            chamberNode.addChildNode(tank)
+        } else {
+            let ch = Make.part(SCNCapsule(capRadius: 0.9, height: 3.2), Mat.white, 0, 1.3, 0)
+            ch.eulerAngles.z = .pi / 2
+            chamberNode.addChildNode(ch)
+            chamberNode.addChildNode(Make.part(Make.box(2.2, 0.5, 1.4, chamfer: 0.05), Mat.dark, 0, 0.25, 0))
+        }
+        if let pad = Kit.make("metalTile", fit: 3.6) {
+            pad.position = SCNVector3(0, -0.2, 0)
+            chamberNode.addChildNode(pad)
+        }
         let cl = Make.label("PRESSURE CHAMBER", size: 0.3)
         cl.position = SCNVector3(0, 2.7, 0)
         chamberNode.addChildNode(cl)
@@ -328,6 +361,10 @@ final class Structures {
                                                    .moveBy(x: 0, y: 1.5, z: 0, duration: 0.9),
                                                    .wait(duration: 0.4)])))
         pressNode.addChildNode(piston)
+        if let pad = Kit.make("metalTile", fit: 3.2) {
+            pad.position = SCNVector3(0, -0.2, 0)
+            pressNode.addChildNode(pad)
+        }
         let sl = Make.label("STONE PRESS", size: 0.3)
         sl.position = SCNVector3(0, 4.3, 0)
         pressNode.addChildNode(sl)
@@ -363,11 +400,15 @@ final class Structures {
         // Capsule Catcher.
         catcherNode.addChildNode(Make.part(SCNCone(topRadius: 2.6, bottomRadius: 0.5, height: 1.7), plateOrange, 0, 3.0, 0))
         catcherNode.addChildNode(Make.part(SCNTube(innerRadius: 2.55, outerRadius: 2.7, height: 0.14), Mat.white, 0, 3.85, 0))
-        for k in 0..<3 {
-            let a = Float(k) * 2.094
-            catcherNode.addChildNode(Make.part(SCNCylinder(radius: 0.07, height: 2.6), Mat.steel, cos(a) * 1.0, 1.2, sin(a) * 1.0))
+        if let tower = Kit.make("metalStructure", fit: 2.4) {
+            catcherNode.addChildNode(tower)
+        } else {
+            for k in 0..<3 {
+                let a = Float(k) * 2.094
+                catcherNode.addChildNode(Make.part(SCNCylinder(radius: 0.07, height: 2.6), Mat.steel, cos(a) * 1.0, 1.2, sin(a) * 1.0))
+            }
+            catcherNode.addChildNode(Make.part(Make.hexPrism(radius: 0.8, height: 0.8), Mat.white, 0, 0.4, 0))
         }
-        catcherNode.addChildNode(Make.part(Make.hexPrism(radius: 0.8, height: 0.8), Mat.white, 0, 0.4, 0))
         let kl = Make.label("CAPSULE CATCHER", size: 0.3)
         kl.position = SCNVector3(0, 4.4, 0)
         catcherNode.addChildNode(kl)
@@ -375,17 +416,25 @@ final class Structures {
 
         // Garage (opens toward +Z).
         garageNode.addChildNode(hexPad(radius: 7))
-        garageNode.addChildNode(Make.part(Make.box(8, 4.2, 0.3), Mat.white, 0, 2.2, -4))
-        garageNode.addChildNode(Make.part(Make.box(0.3, 4.2, 8), Mat.white, -4, 2.2, 0))
-        garageNode.addChildNode(Make.part(Make.box(0.3, 4.2, 8), Mat.white, 4, 2.2, 0))
-        garageNode.addChildNode(Make.part(Make.box(8.6, 0.3, 8.6), Mat.offWhite, 0, 4.45, 0))
-        garageNode.addChildNode(Make.part(Make.box(8.3, 0.6, 0.2), Mat.orange, 0, 4.0, 4.1))
-        garageNode.addChildNode(Make.part(Make.box(7.4, 0.08, 0.05, chamfer: 0), Mat.warmGlow, 0, 3.65, 4.0))
+        if let hangar = Kit.make("buildingOpen", fit: 9.4) {
+            hangar.position = SCNVector3(0, 0.09, 0)
+            garageNode.addChildNode(hangar)
+        } else {
+            garageNode.addChildNode(Make.part(Make.box(8, 4.2, 0.3), Mat.white, 0, 2.2, -4))
+            garageNode.addChildNode(Make.part(Make.box(0.3, 4.2, 8), Mat.white, -4, 2.2, 0))
+            garageNode.addChildNode(Make.part(Make.box(0.3, 4.2, 8), Mat.white, 4, 2.2, 0))
+            garageNode.addChildNode(Make.part(Make.box(8.6, 0.3, 8.6), Mat.offWhite, 0, 4.45, 0))
+            garageNode.addChildNode(Make.part(Make.box(8.3, 0.6, 0.2), Mat.orange, 0, 4.0, 4.1))
+        }
         garageNode.addChildNode(Make.part(Make.box(1.0, 1.3, 0.5), Mat.dark, 3.2, 0.75, -3.4))
         garageNode.addChildNode(Make.part(Make.box(0.8, 0.5, 0.04, chamfer: 0), Mat.cyanGlow, 3.2, 1.1, -3.13))
         let gs = Make.sign("GARAGE", size: 0.6, color: .white)
-        gs.position = SCNVector3(0, 4.0, 4.25)
+        gs.position = SCNVector3(0, 5.4, 4.9)
         garageNode.addChildNode(gs)
+        if let term = Kit.make("consoleScreen", fit: 1.4) {
+            term.position = SCNVector3(3.2, 0.09, -3.3)
+            garageNode.addChildNode(term)
+        }
         add(garageNode, at: garagePos)
     }
 

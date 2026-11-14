@@ -125,11 +125,11 @@ enum Mat {
         return m
     }
 
-    static let white = solid(UIColor(white: 0.93, alpha: 1), spec: 0.35)
+    static let white = solid(UIColor(red: 0.945, green: 0.949, blue: 0.965, alpha: 1), spec: 0.35)
     static let offWhite = solid(UIColor(white: 0.78, alpha: 1))
-    static let orange = solid(UIColor(red: 0.96, green: 0.46, blue: 0.10, alpha: 1), spec: 0.3)
+    static let orange = solid(Kit.orange, spec: 0.3)
     static let dark = solid(UIColor(white: 0.16, alpha: 1), spec: 0.2)
-    static let steel = solid(UIColor(white: 0.55, alpha: 1), spec: 0.6)
+    static let steel = solid(UIColor(red: 0.616, green: 0.678, blue: 0.729, alpha: 1), spec: 0.6)
     static let solar = solid(UIColor(red: 0.07, green: 0.20, blue: 0.62, alpha: 1), spec: 0.9)
     static let rubber = solid(UIColor(white: 0.08, alpha: 1), spec: 0.05)
     static let bristle = solid(UIColor(white: 0.97, alpha: 1), spec: 0.05)
@@ -192,6 +192,41 @@ enum Make {
         let g = SCNGeometry(sources: [SCNGeometrySource(vertices: pos), SCNGeometrySource(normals: nrm)],
                             elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
         return g
+    }
+
+    /// Arched roof in the Space Kit style: a faceted barrel vault running along Z,
+    /// `width` wide at its base (y = 0) and `rise` tall, with closed gable ends.
+    static func archRoof(width: Float, length: Float, rise: Float) -> SCNGeometry {
+        let hw = width / 2, hl = length / 2
+        let profile: [SIMD2<Float>] = [
+            SIMD2(-hw, 0), SIMD2(-hw * 0.78, rise * 0.62), SIMD2(-hw * 0.38, rise),
+            SIMD2(hw * 0.38, rise), SIMD2(hw * 0.78, rise * 0.62), SIMD2(hw, 0),
+        ]
+        var pos: [SCNVector3] = []
+        var nrm: [SCNVector3] = []
+        var idx: [UInt16] = []
+        for k in 0..<(profile.count - 1) {
+            let a = profile[k], b = profile[k + 1]
+            let d = simd_normalize(b - a)
+            let n = SCNVector3(-d.y, d.x, 0)
+            let base = UInt16(pos.count)
+            pos.append(SCNVector3(a.x, a.y, -hl)); pos.append(SCNVector3(b.x, b.y, -hl))
+            pos.append(SCNVector3(a.x, a.y, hl)); pos.append(SCNVector3(b.x, b.y, hl))
+            for _ in 0..<4 { nrm.append(n) }
+            idx.append(contentsOf: [base, base + 1, base + 2, base + 2, base + 1, base + 3])
+        }
+        for (z, nz) in [(-hl, Float(-1)), (hl, Float(1))] {
+            let base = UInt16(pos.count)
+            for q in profile {
+                pos.append(SCNVector3(q.x, q.y, z))
+                nrm.append(SCNVector3(0, 0, nz))
+            }
+            for k in 1..<(profile.count - 1) {
+                idx.append(contentsOf: [base, base + UInt16(k), base + UInt16(k + 1)])
+            }
+        }
+        return SCNGeometry(sources: [SCNGeometrySource(vertices: pos), SCNGeometrySource(normals: nrm)],
+                           elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
     }
 
     /// Fixed (non-billboard) sign text, centred on the returned node, facing +Z.

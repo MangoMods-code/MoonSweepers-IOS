@@ -32,7 +32,10 @@ final class SweepBot {
         self.position = start
         self.dustPuff = SweepBot.makeDustParticles()
 
-        if kind == .vacuum {
+        if kind == .vacuum, let robot = Kit.make("robot", fit: 1.15) {
+            node.addChildNode(robot)
+            node.addChildNode(Make.part(SCNCylinder(radius: 0.3, height: 0.05), Mat.toolBlue, 0, 0.04, -0.62))
+        } else if kind == .vacuum {
             node.addChildNode(Make.part(SCNCylinder(radius: 0.5, height: 0.22), Mat.white, 0, 0.2, 0))
             node.addChildNode(Make.part(SCNTube(innerRadius: 0.5, outerRadius: 0.54, height: 0.1), Mat.orange, 0, 0.2, 0))
             node.addChildNode(Make.part(SCNCylinder(radius: 0.16, height: 0.06), Mat.cyanGlow, 0, 0.33, -0.15))

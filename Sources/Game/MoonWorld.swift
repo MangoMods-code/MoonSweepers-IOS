@@ -24,6 +24,7 @@ final class MoonWorld {
     private let sunDisc = SCNNode()
     private let ambientNode = SCNNode()
     private let earthshineNode = SCNNode()
+    private let fillNode = SCNNode()
 
     /// 0..1 through one lunar day.
     var timeOfDay: Float = 0.06
@@ -234,6 +235,9 @@ final class MoonWorld {
             g.materials = [m]
             shapes.append(g)
         }
+        let kitRocks = ["rocks", "rocksSmall", "rocksTall", "meteorHalf", "meteorFullRound"]
+        let kitTones = [UIColor(white: 0.25, alpha: 1), UIColor(white: 0.31, alpha: 1),
+                        UIColor(red: 0.34, green: 0.35, blue: 0.38, alpha: 1)]
         var groups: [SCNNode] = (0..<Hex.count).map { _ in SCNNode() }
         var placed = 0
         var tries = 0
@@ -251,13 +255,23 @@ final class MoonWorld {
             }
             if !ok { continue }
             let big = scale >= 0.7
-            let node = SCNNode(geometry: shapes[big ? Int.random(in: 0..<4, using: &rng) : Int.random(in: 4..<10, using: &rng)])
             let y = height(atX: x, z: z)
+            let shapeIndex = big ? Int.random(in: 0..<4, using: &rng) : Int.random(in: 4..<10, using: &rng)
+            let kitIndex = Int.random(in: 0..<kitRocks.count, using: &rng)
+            let toneIndex = Int.random(in: 0..<kitTones.count, using: &rng)
+            var node = SCNNode(geometry: shapes[shapeIndex])
             node.position = SCNVector3(x, y + scale * 0.12, z)
             node.scale = SCNVector3(scale, scale, scale)
-            node.eulerAngles = SCNVector3(Float.random(in: -0.2...0.2, using: &rng),
-                                          Float.random(in: 0...6.28, using: &rng),
-                                          Float.random(in: -0.2...0.2, using: &rng))
+            // Bigger rocks use the Space Kit models, repainted moon-grey.
+            if scale >= 0.4, let kit = Kit.make(kitRocks[kitIndex], fit: scale * 2.3,
+                                                tint: kitTones[toneIndex], tintKey: "moon\(toneIndex)") {
+                node = kit
+                node.position = SCNVector3(x, y - scale * (kitIndex == 4 ? 0.5 : 0.08), z)
+            }
+            let tiltX = Float.random(in: -0.2...0.2, using: &rng)
+            let spin = Float.random(in: 0...6.28, using: &rng)
+            let tiltZ = Float.random(in: -0.2...0.2, using: &rng)
+            node.eulerAngles = node.geometry == nil ? SCNVector3(0, spin, 0) : SCNVector3(tiltX, spin, tiltZ)
             groups[Hex.nearest(x, z)].addChildNode(node)
             if scale >= 0.9 { addCollider(x: x, z: z, r: scale * 0.8) }
             placed += 1
@@ -455,6 +469,15 @@ final class MoonWorld {
         earthshineNode.look(at: SCNVector3(0, 0, 0))
         scene.rootNode.addChildNode(earthshineNode)
 
+        // Soft fill from the side opposite the sun, so shadowed walls keep their shape.
+        let fill = SCNLight()
+        fill.type = .directional
+        fill.color = UIColor(red: 0.74, green: 0.79, blue: 0.9, alpha: 1)
+        fill.intensity = 0
+        fill.castsShadow = false
+        fillNode.light = fill
+        scene.rootNode.addChildNode(fillNode)
+
         let disc = SCNSphere(radius: 20)
         disc.materials = [Mat.glow(UIColor(red: 1, green: 0.99, blue: 0.93, alpha: 1))]
         sunDisc.geometry = disc
@@ -477,6 +500,10 @@ final class MoonWorld {
         let dir = simd_normalize(SIMD3<Float>(cos(ang), elev, 0.4))
         sunNode.simdPosition = SIMD3<Float>(WorldDims.centerX, 0, WorldDims.centerZ) + dir * 150
         sunNode.look(at: SCNVector3(WorldDims.centerX, 0, WorldDims.centerZ))
+        let centre = SIMD3<Float>(WorldDims.centerX, 0, WorldDims.centerZ)
+        fillNode.simdPosition = centre + simd_normalize(SIMD3<Float>(-dir.x, 0.35, -dir.z)) * 150
+        fillNode.look(at: SCNVector3(centre.x, centre.y, centre.z))
+        fillNode.light?.intensity = nightVision ? 0 : CGFloat(60 + 300 * daylight)
         sunDisc.simdPosition = dir * 900
         sunDisc.isHidden = dir.y < -0.03
         daylight = smoothstep(-0.04, 0.14, dir.y)
@@ -486,7 +513,7 @@ final class MoonWorld {
             ambientNode.light?.intensity = 950
             ambientNode.light?.color = UIColor(red: 0.75, green: 1, blue: 0.8, alpha: 1)
         } else {
-            ambientNode.light?.intensity = CGFloat(28 + 130 * daylight)
+            ambientNode.light?.intensity = CGFloat(24 + 96 * daylight)
             ambientNode.light?.color = UIColor(red: 0.62, green: 0.68, blue: 0.8, alpha: 1)
         }
     }
