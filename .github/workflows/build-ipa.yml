@@ -1,0 +1,72 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Read version
+        id: ver
+        run: |
+          VERSION=$(grep 'MARKETING_VERSION' project.yml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          BUILD=${{ github.run_number }}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION ($BUILD)"
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project MoonSweepers.xcodeproj \
+            -scheme MoonSweepers \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CURRENT_PROJECT_VERSION=${{ steps.ver.outputs.build }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee xcodebuild.log | grep -E "error:|warning: unre|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/MoonSweepers.app
+
+      - name: Show compile errors
+        if: failure()
+        run: grep -E "error:" -A3 xcodebuild.log | head -200 || true
+
+      - name: Package IPA
+        id: ipa
+        run: |
+          NAME="MoonSweepers-${{ steps.ver.outputs.version }}-b${{ steps.ver.outputs.build }}.ipa"
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/MoonSweepers.app Payload/
+          zip -qry "$NAME" Payload
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          ls -lh "$NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.ipa.outputs.name }}
+          path: ${{ steps.ipa.outputs.name }}
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}-b${{ steps.ver.outputs.build }}
+          name: Moon Sweepers iOS ${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.build }})
+          body: Unsigned IPA — sign with Mango Signer before installing.
+          files: ${{ steps.ipa.outputs.name }}
