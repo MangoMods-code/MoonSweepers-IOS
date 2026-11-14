@@ -298,36 +298,32 @@ final class DustField {
         return Float(extra) * kgPerValue
     }
 
-    /// Instantly wipes the dust inside a circle. Cells store how far they are from the brush
-    /// edge (a small distance field), so the shader can draw a smooth edge at exactly the
-    /// brush radius. A cell counts as dust while its value is 128 or more. Returns kg
-    /// collected, never more than `capacityLeft`.
-    @discardableResult
-    func clean(atX x: Float, z: Float, radius: Float, capacityLeft: Float) -> Float {
+    /// Instantly wipes the dust inside a shape. `distance(dx, dz)` is the signed distance from
+    /// the shape's edge (negative inside); cells store it as a small distance field so the
+    /// shader can draw a smooth edge exactly on the outline. A cell counts as dust while its
+    /// value is 128 or more. Returns kg collected, never more than `capacityLeft`.
+    private func wipe(x: Float, z: Float, bound: Float, capacityLeft: Float,
+                      distance: (Float, Float) -> Float) -> Float {
         guard capacityLeft > 0.00001 else { return 0 }
         let cs = cellSize
-        let outer = radius + cs
-        guard let (i0, j0, i1, j1) = box(x, z, outer + cs) else { return 0 }
+        guard let (i0, j0, i1, j1) = box(x, z, bound + 2 * cs) else { return 0 }
         let perValue = kgPerValue
         var budget = Int(capacityLeft / perValue)
         if budget < 255 { return 0 }
         var removed = 0
         var changed = false
         var touched: [Int] = []
-        let outer2 = outer * outer
         outerLoop: for j in j0...j1 {
             let wz = WorldDims.minZ + (Float(j) + 0.5) * cs
-            let dz = wz - z
             for i in i0...i1 {
                 let idx = j * res + i
                 let cur = mask[idx]
                 if cur == 0 { continue }
                 let wx = WorldDims.minX + (Float(i) + 0.5) * cs
-                let dx = wx - x
-                let d2 = dx * dx + dz * dz
-                if d2 >= outer2 { continue }
-                // 0 deep inside the brush, 0.5 exactly on its rim, 1 one cell outside.
-                let cov = (d2.squareRoot() - radius) / (2 * cs) + 0.5
+                let d = distance(wx - x, wz - z)
+                if d >= cs { continue }
+                // 0 deep inside, 0.5 exactly on the outline, 1 one cell outside.
+                let cov = d / (2 * cs) + 0.5
                 let target: UInt8 = cov <= 0.06 ? 0 : UInt8(min(255, cov * 255))
                 if cur <= target { continue }
                 if cur >= 128 && target < 128 {
@@ -350,17 +346,39 @@ final class DustField {
         return kg
     }
 
-    /// Cleans along a stroke so fast sweeps leave a continuous line instead of dots.
-    func cleanStroke(from a: SIMD2<Float>, to b: SIMD2<Float>, radius: Float, capacityLeft: Float) -> Float {
+    /// Round brush (vehicles and robots).
+    @discardableResult
+    func clean(atX x: Float, z: Float, radius: Float, capacityLeft: Float) -> Float {
+        wipe(x: x, z: z, bound: radius, capacityLeft: capacityLeft) { dx, dz in
+            (dx * dx + dz * dz).squareRoot() - radius
+        }
+    }
+
+    /// Brush-head-shaped strip: `halfWidth` along `across`, `halfDepth` front to back.
+    func cleanBar(atX x: Float, z: Float, across: SIMD2<Float>, halfWidth: Float, halfDepth: Float,
+                  capacityLeft: Float) -> Float {
+        let along = SIMD2<Float>(-across.y, across.x)
+        let bound = (halfWidth * halfWidth + halfDepth * halfDepth).squareRoot()
+        return wipe(x: x, z: z, bound: bound, capacityLeft: capacityLeft) { dx, dz in
+            let qx = abs(dx * across.x + dz * across.y) - halfWidth
+            let qz = abs(dx * along.x + dz * along.y) - halfDepth
+            let ox = max(qx, 0), oz = max(qz, 0)
+            return (ox * ox + oz * oz).squareRoot() + min(max(qx, qz), 0)
+        }
+    }
+
+    /// Sweeps the brush head from `a` to `b` so fast strokes leave a continuous strip.
+    func cleanBarStroke(from a: SIMD2<Float>, to b: SIMD2<Float>, across: SIMD2<Float>,
+                        halfWidth: Float, halfDepth: Float, capacityLeft: Float) -> Float {
         let len = simd_length(b - a)
-        let stepLen = max(radius * 0.7, cellSize)
-        let steps = max(1, min(80, Int((len / stepLen).rounded(.up))))
+        let stepLen = max(halfDepth * 1.2, cellSize)
+        let steps = max(1, min(120, Int((len / stepLen).rounded(.up))))
         var got: Float = 0
         for s in 1...steps {
             let p = a + (b - a) * (Float(s) / Float(steps))
             let left = capacityLeft - got
             if left <= 0.00001 { break }
-            got += clean(atX: p.x, z: p.y, radius: radius, capacityLeft: left)
+            got += cleanBar(atX: p.x, z: p.y, across: across, halfWidth: halfWidth, halfDepth: halfDepth, capacityLeft: left)
         }
         return got
     }

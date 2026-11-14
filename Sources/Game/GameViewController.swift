@@ -14,6 +14,11 @@ final class GameViewController: UIViewController {
     private var vehicle: Vehicle?
     private var driving = false
     private let aimRing = SCNNode()
+    private let workTool = SCNNode()
+    private let workSide = SCNNode()
+    private let workTilt = SCNNode()
+    private var workToolIndex = -1
+    private var workPhase: Float = 0
     private let brushPuffNode = SCNNode()
     private var brushPuff: SCNParticleSystem!
 
@@ -136,17 +141,70 @@ final class GameViewController: UIViewController {
     }
 
     private func setupAimRing() {
-        let tube = SCNTube(innerRadius: 0.93, outerRadius: 1.0, height: 0.015)
-        tube.radialSegmentCount = 40
-        let m = Mat.glow(UIColor(white: 1, alpha: 0.7))
+        // A thin rectangle showing exactly what the tool head will clean.
+        let m = Mat.glow(UIColor(white: 1, alpha: 0.75))
         m.readsFromDepthBuffer = false
         m.writesToDepthBuffer = false
-        tube.materials = [m]
-        aimRing.geometry = tube
-        aimRing.renderingOrder = 50
-        aimRing.castsShadow = false
+        for _ in 0..<4 {
+            let bar = SCNNode(geometry: SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0))
+            bar.geometry?.materials = [m]
+            bar.renderingOrder = 50
+            bar.castsShadow = false
+            aimRing.addChildNode(bar)
+        }
         aimRing.isHidden = true
         scene.rootNode.addChildNode(aimRing)
+
+        workTool.isHidden = true
+        workTool.addChildNode(workSide)
+        workSide.addChildNode(workTilt)
+        scene.rootNode.addChildNode(workTool)
+    }
+
+    private func layoutAimFrame(halfWidth: Float, halfDepth: Float) {
+        let t: Float = 0.012
+        let bars = aimRing.childNodes
+        guard bars.count == 4 else { return }
+        bars[0].simdScale = SIMD3<Float>(halfWidth * 2 + t, 0.004, t)
+        bars[0].simdPosition = SIMD3<Float>(0, 0, -halfDepth)
+        bars[1].simdScale = SIMD3<Float>(halfWidth * 2 + t, 0.004, t)
+        bars[1].simdPosition = SIMD3<Float>(0, 0, halfDepth)
+        bars[2].simdScale = SIMD3<Float>(t, 0.004, halfDepth * 2 + t)
+        bars[2].simdPosition = SIMD3<Float>(-halfWidth, 0, 0)
+        bars[3].simdScale = SIMD3<Float>(t, 0.004, halfDepth * 2 + t)
+        bars[3].simdPosition = SIMD3<Float>(halfWidth, 0, 0)
+    }
+
+    /// The tool itself, laid on the ground at the spot being cleaned, sized so its head
+    /// matches the strip it sweeps.
+    private func updateWorkTool(aim: SIMD3<Float>?, halfWidth: Float, dt: Float) {
+        guard let aim = aim, save.hasTool else {
+            workTool.isHidden = true
+            return
+        }
+        let index = save.currentTool
+        if workToolIndex != index {
+            workToolIndex = index
+            workTilt.childNodes.forEach { $0.removeFromParentNode() }
+            let model = ToolModels.make(index)
+            // Head position in the model (it points along -Z, bristles down).
+            let heads: [SIMD3<Float>] = [SIMD3(0, -0.018, -0.185), SIMD3(0, -0.03, -0.06), SIMD3(0, -0.045, -0.2),
+                                         SIMD3(0, -0.115, -1.16), SIMD3(0, -0.115, -1.16), SIMD3(0, -0.115, -1.16)]
+            model.simdPosition = -heads[index]
+            workTilt.addChildNode(model)
+            // Small brushes are swept side-on (wide, not long); brooms are pushed head-first.
+            let sideways = index == 1 || index == 2
+            workSide.eulerAngles.y = sideways ? .pi / 2 : 0
+            workTilt.eulerAngles.x = index >= 3 ? -0.62 : (index == 0 ? -0.3 : -0.1)
+        }
+        let headWidths: [Float] = [0.04, 0.10, 0.15, 0.34, 0.56, 0.84]
+        let k = index == 0 ? 2.6 * (halfWidth / 0.06) : (halfWidth * 2) / headWidths[index]
+        workSide.simdScale = SIMD3<Float>(k, k, k)
+        workPhase += dt * 16
+        let stroke = sin(workPhase) * (index >= 3 ? 0.05 : 0.02)
+        workTool.simdPosition = aim + SIMD3<Float>(0, 0.045, 0) + player.forward * stroke
+        workTool.eulerAngles.y = player.yaw
+        workTool.isHidden = false
     }
 
     private func applySave() {
@@ -999,6 +1057,7 @@ final class GameViewController: UIViewController {
             v.setSweeping(got > 0)
             collecting = got > 0
             aimRing.isHidden = true
+            workTool.isHidden = true
             brushPuff.birthRate = 0
             player.animateTool(dt: dt, scrubbing: false)
         } else {
@@ -1007,12 +1066,16 @@ final class GameViewController: UIViewController {
             if player.stepEvent { Sfx.shared.play("step", volume: 0.5) }
 
             let radius = save.toolRadius
+            let halfDepth = save.toolHalfDepth
+            let across = SIMD2<Float>(cos(player.yaw), -sin(player.yaw))
+            var working: SIMD3<Float>? = nil
             let cap = save.toolCapacity
             if let aim = player.aimPoint(world: world, reach: save.toolReach) {
                 aimRing.isHidden = false
                 aimRing.simdPosition = aim + SIMD3<Float>(0, 0.07, 0)
-                let ringR = radius + 0.1
-                aimRing.simdScale = SIMD3<Float>(ringR, 1, ringR)
+                aimRing.eulerAngles.y = player.yaw
+                layoutAimFrame(halfWidth: radius, halfDepth: halfDepth)
+                if scrubHeld && save.hasTool { working = aim }
                 brushPuffNode.simdPosition = aim + SIMD3<Float>(0, 0.06, 0)
                 if scrubHeld && !save.hasTool {
                     if tipCooldown <= 0 {
@@ -1034,7 +1097,8 @@ final class GameViewController: UIViewController {
                         var from = here
                         if let last = lastAim, simd_length(last - here) < 2.5 { from = last }
                         lastAim = here
-                        let got = dust.cleanStroke(from: from, to: here, radius: radius, capacityLeft: left)
+                        let got = dust.cleanBarStroke(from: from, to: here, across: across,
+                                                      halfWidth: radius, halfDepth: halfDepth, capacityLeft: left)
                         if got > 0 {
                             collecting = true
                             save.toolLoad += got
@@ -1051,7 +1115,9 @@ final class GameViewController: UIViewController {
             if !scrubHeld { lastAim = nil }
             brushPuff.birthRate = collecting ? CGFloat(40 + radius * 160) : 0
             aimRing.isHidden = aimRing.isHidden || !save.hasTool
-            player.animateTool(dt: dt, scrubbing: scrubHeld && save.hasTool)
+            updateWorkTool(aim: working, halfWidth: radius, dt: dt)
+            player.setToolVisible(working == nil)
+            player.animateTool(dt: dt, scrubbing: false)
         }
         jumpQueued = false
 

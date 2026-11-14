@@ -3,7 +3,8 @@ import Foundation
 struct HandTool {
     let name: String
     let cost: Int
-    let width: Float     // meters swept
+    let width: Float     // meters swept (across)
+    let depth: Float     // meters front-to-back of the head
     let capacity: Float  // kg held in the tool's container
     let rate: Float      // how fast it lifts dust
     let reach: Float     // meters from the eye
@@ -29,12 +30,12 @@ struct Perk {
 
 enum Catalog {
     static let tools: [HandTool] = [
-        HandTool(name: "Toothbrush", cost: 0, width: 0.12, capacity: 0.5, rate: 1.4, reach: 5.5),
-        HandTool(name: "Nail Brush", cost: 5, width: 0.20, capacity: 1.0, rate: 1.5, reach: 5.5),
-        HandTool(name: "Handbrush", cost: 10, width: 0.35, capacity: 1.5, rate: 1.6, reach: 5.5),
-        HandTool(name: "Household Broom", cost: 25, width: 0.60, capacity: 3.0, rate: 1.8, reach: 6.0),
-        HandTool(name: "Wide Broom", cost: 75, width: 1.00, capacity: 5.0, rate: 2.0, reach: 6.0),
-        HandTool(name: "Extra Wide Broom", cost: 150, width: 1.50, capacity: 8.0, rate: 2.2, reach: 6.5),
+        HandTool(name: "Toothbrush", cost: 0, width: 0.12, depth: 0.06, capacity: 0.5, rate: 1.4, reach: 5.5),
+        HandTool(name: "Nail Brush", cost: 5, width: 0.20, depth: 0.10, capacity: 1.0, rate: 1.5, reach: 5.5),
+        HandTool(name: "Handbrush", cost: 10, width: 0.35, depth: 0.15, capacity: 1.5, rate: 1.6, reach: 5.5),
+        HandTool(name: "Household Broom", cost: 25, width: 0.60, depth: 0.10, capacity: 3.0, rate: 1.8, reach: 6.0),
+        HandTool(name: "Wide Broom", cost: 75, width: 1.00, depth: 0.10, capacity: 5.0, rate: 2.0, reach: 6.0),
+        HandTool(name: "Extra Wide Broom", cost: 150, width: 1.50, depth: 0.11, capacity: 8.0, rate: 2.2, reach: 6.5),
     ]
 
     static let vehicles: [VehicleTier] = [
@@ -144,6 +145,7 @@ struct SaveData: Codable {
     var tool: HandTool { Catalog.tools[max(0, currentTool)] }
     var toolCapacity: Float { tool.capacity * (1 + 0.2 * Float(compactor)) }
     var toolRadius: Float { tool.width / 2 * (1 + 0.15 * Float(wideHeads)) }
+    var toolHalfDepth: Float { tool.depth / 2 }
     var toolReach: Float { tool.reach + 0.6 * Float(bristles) }
     var capsuleCapacity: Float { Catalog.capsuleSizes[min(capsuleSize, Catalog.capsuleSizes.count - 1)] }
     var moveSpeed: Float { hasBoots ? 5.2 : 3.4 }
