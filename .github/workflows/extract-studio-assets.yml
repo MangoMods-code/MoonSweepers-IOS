@@ -1,0 +1,77 @@
+name: Extract studio assets
+
+# Downloads Moon Sweepers from Steam with the account in this repo's secrets
+# (STEAM_USERNAME / STEAM_PASSWORD) and exports its models and textures as a
+# private workflow artifact. Only runs while the repository is PRIVATE.
+
+on:
+  workflow_dispatch:
+    inputs:
+      steam_guard_code:
+        description: "Steam Guard code (leave empty if you approve the login in the Steam app)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Refuse to run on a public repository
+        if: ${{ !github.event.repository.private }}
+        run: |
+          echo "::error::Make the repository private first (Settings > General > Danger Zone > Change visibility)."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        env:
+          U: ${{ secrets.STEAM_USERNAME }}
+          P: ${{ secrets.STEAM_PASSWORD }}
+        run: |
+          if [ -z "$U" ] || [ -z "$P" ]; then
+            echo "::error::Add STEAM_USERNAME and STEAM_PASSWORD under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Get DepotDownloader
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo SteamRE/DepotDownloader --pattern '*linux-x64*' --dir dd
+          cd dd && unzip -q *.zip && chmod +x DepotDownloader
+
+      - name: Download the game (approve the login in your Steam app now)
+        timeout-minutes: 40
+        env:
+          U: ${{ secrets.STEAM_USERNAME }}
+          P: ${{ secrets.STEAM_PASSWORD }}
+          CODE: ${{ github.event.inputs.steam_guard_code }}
+        run: |
+          echo 'regex:.*_Data[\\/].*' > filelist.txt
+          { if [ -n "$CODE" ]; then echo "$CODE"; fi; sleep 2400; } | \
+            ./dd/DepotDownloader -app 5335510 -os windows -username "$U" -password "$P" \
+              -filelist filelist.txt -dir game
+          du -sh game
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Export models and textures
+        run: |
+          pip install --quiet UnityPy Pillow
+          python tools/extract_unity.py game studio
+          rm -rf game
+          du -sh studio
+          (cd studio && zip -qr ../studio-assets.zip .)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-assets
+          path: studio-assets.zip
+          retention-days: 7
