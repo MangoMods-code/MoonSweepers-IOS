@@ -313,6 +313,7 @@ final class DustField {
         var removed = 0
         var changed = false
         var touched: [Int] = []
+        var seeds: [Int] = []
         outerLoop: for j in j0...j1 {
             let wz = WorldDims.minZ + (Float(j) + 0.5) * cs
             for i in i0...i1 {
@@ -333,17 +334,83 @@ final class DustField {
                     remove(tile: t, 255)
                     removed += 255
                     if touched.last != t && !touched.contains(t) { touched.append(t) }
+                    if i > 0 { seeds.append(idx - 1) }
+                    if i < res - 1 { seeds.append(idx + 1) }
+                    if j > 0 { seeds.append(idx - res) }
+                    if j < res - 1 { seeds.append(idx + res) }
                 }
                 mask[idx] = target
                 changed = true
             }
         }
-        var kg = Float(removed) * perValue
         if changed { upload(i0, j0, i1, j1) }
+        removed += sweepSpecks(seeds: seeds, touched: &touched)
+        var kg = Float(removed) * perValue
         if removed > 0 {
             for t in touched { kg += sealIfDone(t) }
         }
         return kg
+    }
+
+    /// No stray specks: any island of dust left next to what was just cleaned that is
+    /// smaller than about 0.8 square metres is swept up along with it.
+    private func sweepSpecks(seeds: [Int], touched: inout [Int]) -> Int {
+        if seeds.isEmpty { return 0 }
+        let limit = 200
+        var visited = Set<Int>()
+        var removed = 0
+        for seed in seeds {
+            if mask[seed] < 128 || visited.contains(seed) { continue }
+            var island: [Int] = [seed]
+            visited.insert(seed)
+            var head = 0
+            var tooBig = false
+            while head < island.count {
+                let idx = island[head]
+                head += 1
+                let i = idx % res, j = idx / res
+                for dj in -1...1 {
+                    let jj = j + dj
+                    if jj < 0 || jj >= res { continue }
+                    for di in -1...1 {
+                        let ii = i + di
+                        if ii < 0 || ii >= res || (di == 0 && dj == 0) { continue }
+                        let n = jj * res + ii
+                        if mask[n] >= 128 && !visited.contains(n) {
+                            visited.insert(n)
+                            island.append(n)
+                        }
+                    }
+                }
+                if island.count > limit {
+                    tooBig = true
+                    break
+                }
+            }
+            if tooBig { continue }
+            var i0 = res, j0 = res, i1 = -1, j1 = -1
+            for idx in island {
+                let i = idx % res, j = idx / res
+                let wx = WorldDims.minX + (Float(i) + 0.5) * cellSize
+                let wz = WorldDims.minZ + (Float(j) + 0.5) * cellSize
+                let t = Tile.index(wx, wz)
+                remove(tile: t, 255)
+                removed += 255
+                mask[idx] = 0
+                if !touched.contains(t) { touched.append(t) }
+                i0 = min(i0, i); i1 = max(i1, i); j0 = min(j0, j); j1 = max(j1, j)
+            }
+            // Also clear the faint edge values hugging the island.
+            let a0 = max(0, i0 - 1), b0 = max(0, j0 - 1)
+            let a1 = min(res - 1, i1 + 1), b1 = min(res - 1, j1 + 1)
+            for j in b0...b1 {
+                for i in a0...a1 where mask[j * res + i] < 128 {
+                    mask[j * res + i] = 0
+                }
+            }
+            upload(a0, b0, a1, b1)
+        }
+        return removed
     }
 
     /// Round brush (vehicles and robots).
