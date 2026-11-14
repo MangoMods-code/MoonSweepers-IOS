@@ -175,8 +175,8 @@ final class DustField {
         float dustW = clamp(fwidth(dustA) * 0.75, 0.015, 0.2);
         float dustEdge = smoothstep(0.5 - dustW, 0.5 + dustW, dustA);
         float3 dustRGB = _output.color.rgb / max(dustA, 0.001);
-        float dustRim = 1.0 - smoothstep(0.56, 0.99, dustA);
-        dustRGB = dustRGB * (1.0 - 0.85 * dustRim);
+        float dustRim = 1.0 - smoothstep(0.62, 0.97, dustA);
+        dustRGB = dustRGB * (1.0 - 0.9 * dustRim);
         _output.color = float4(dustRGB * dustEdge, dustEdge);
         """]
     }
@@ -249,7 +249,7 @@ final class DustField {
                 if cur == 0 { continue }
                 let wx = WorldDims.minX + (Float(i) + 0.5) * cellSize
                 if inside(wx - x, wz - z) {
-                    remove(tile: Tile.index(wx, wz), Int(cur))
+                    if cur >= 128 { remove(tile: Tile.index(wx, wz), 255) }
                     mask[idx] = 0
                     changed = true
                 }
@@ -273,6 +273,7 @@ final class DustField {
         if Double(tileDust[t]) > Double(initial) * 0.005 { return 0 }
         let c = Tile.center(t)
         var extra = 0
+        var wiped = false
         if let (i0, j0, i1, j1) = box(c.x, c.y, Tile.radius + 0.2) {
             for j in j0...j1 {
                 let wz = WorldDims.minZ + (Float(j) + 0.5) * cellSize
@@ -282,31 +283,37 @@ final class DustField {
                     if cur == 0 { continue }
                     let wx = WorldDims.minX + (Float(i) + 0.5) * cellSize
                     if Tile.index(wx, wz) == t {
-                        extra += Int(cur)
-                        remove(tile: t, Int(cur))
+                        if cur >= 128 {
+                            extra += 255
+                            remove(tile: t, 255)
+                        }
                         mask[idx] = 0
+                        wiped = true
                     }
                 }
             }
-            if extra > 0 { upload(i0, j0, i1, j1) }
+            if wiped { upload(i0, j0, i1, j1) }
         }
         completed.append(t)
         return Float(extra) * kgPerValue
     }
 
-    /// Instantly wipes the dust inside a circle. Returns kg collected, never more than
-    /// `capacityLeft` (cleaning simply stops when the container is full).
+    /// Instantly wipes the dust inside a circle. Cells store how far they are from the brush
+    /// edge (a small distance field), so the shader can draw a smooth edge at exactly the
+    /// brush radius. A cell counts as dust while its value is 128 or more. Returns kg
+    /// collected, never more than `capacityLeft`.
     @discardableResult
     func clean(atX x: Float, z: Float, radius: Float, capacityLeft: Float) -> Float {
         guard capacityLeft > 0.00001 else { return 0 }
         let cs = cellSize
-        guard let (i0, j0, i1, j1) = box(x, z, radius + cs) else { return 0 }
+        let outer = radius + cs
+        guard let (i0, j0, i1, j1) = box(x, z, outer + cs) else { return 0 }
         let perValue = kgPerValue
         var budget = Int(capacityLeft / perValue)
-        if budget <= 0 { return 0 }
+        if budget < 255 { return 0 }
         var removed = 0
+        var changed = false
         var touched: [Int] = []
-        let outer = radius + cs * 0.5
         let outer2 = outer * outer
         outerLoop: for j in j0...j1 {
             let wz = WorldDims.minZ + (Float(j) + 0.5) * cs
@@ -319,23 +326,25 @@ final class DustField {
                 let dx = wx - x
                 let d2 = dx * dx + dz * dz
                 if d2 >= outer2 { continue }
-                // Coverage: 0 well inside the brush, rising to 1 at its rim (sub-cell accurate).
-                let cov = (d2.squareRoot() - radius) / cs + 0.5
-                let target: UInt8 = cov < 0.5 ? 0 : UInt8(min(255, cov * 255))
+                // 0 deep inside the brush, 0.5 exactly on its rim, 1 one cell outside.
+                let cov = (d2.squareRoot() - radius) / (2 * cs) + 0.5
+                let target: UInt8 = cov <= 0.06 ? 0 : UInt8(min(255, cov * 255))
                 if cur <= target { continue }
-                let delta = Int(cur - target)
-                if delta > budget { break outerLoop }
-                budget -= delta
+                if cur >= 128 && target < 128 {
+                    if budget < 255 { break outerLoop }
+                    budget -= 255
+                    let t = Tile.index(wx, wz)
+                    remove(tile: t, 255)
+                    removed += 255
+                    if touched.last != t && !touched.contains(t) { touched.append(t) }
+                }
                 mask[idx] = target
-                let t = Tile.index(wx, wz)
-                remove(tile: t, delta)
-                removed += delta
-                if touched.last != t && !touched.contains(t) { touched.append(t) }
+                changed = true
             }
         }
         var kg = Float(removed) * perValue
+        if changed { upload(i0, j0, i1, j1) }
         if removed > 0 {
-            upload(i0, j0, i1, j1)
             for t in touched { kg += sealIfDone(t) }
         }
         return kg

@@ -263,16 +263,23 @@ final class MoonWorld {
             node.position = SCNVector3(x, y + scale * 0.12, z)
             node.scale = SCNVector3(scale, scale, scale)
             // Bigger rocks use the Space Kit models, repainted moon-grey.
-            if scale >= 0.4, let kit = Kit.make(kitRocks[kitIndex], fit: scale * 2.3,
+            var isKit = false
+            if scale >= 0.7, let kit = Kit.make(kitRocks[kitIndex], fit: scale * 2.3,
                                                 tint: kitTones[toneIndex], tintKey: "moon\(toneIndex)") {
                 node = kit
                 node.position = SCNVector3(x, y - scale * (kitIndex == 4 ? 0.5 : 0.08), z)
+                isKit = true
             }
             let tiltX = Float.random(in: -0.2...0.2, using: &rng)
             let spin = Float.random(in: 0...6.28, using: &rng)
             let tiltZ = Float.random(in: -0.2...0.2, using: &rng)
-            node.eulerAngles = node.geometry == nil ? SCNVector3(0, spin, 0) : SCNVector3(tiltX, spin, tiltZ)
-            groups[Hex.nearest(x, z)].addChildNode(node)
+            node.eulerAngles = isKit ? SCNVector3(0, spin, 0) : SCNVector3(tiltX, spin, tiltZ)
+            if isKit {
+                node.castsShadow = true
+                root.addChildNode(node)
+            } else {
+                groups[Hex.nearest(x, z)].addChildNode(node)
+            }
             if scale >= 0.9 { addCollider(x: x, z: z, r: scale * 0.8) }
             placed += 1
         }

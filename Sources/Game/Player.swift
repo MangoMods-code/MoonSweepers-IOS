@@ -54,10 +54,10 @@ final class Player {
 
         cameraNode.addChildNode(toolHolder)
 
-        let cap = Structures.makeCapsule(scale: 1)
+        let cap = Structures.makeCapsule(scale: 0.5)
         cap.eulerAngles = SCNVector3(0.35, 0, 1.25)
         capsuleNode.addChildNode(cap)
-        capsuleNode.position = SCNVector3(-0.34, -0.2, -0.62)
+        capsuleNode.position = SCNVector3(-0.4, -0.24, -0.7)
         capsuleNode.isHidden = true
         Make.noShadows(capsuleNode)
         cameraNode.addChildNode(capsuleNode)
