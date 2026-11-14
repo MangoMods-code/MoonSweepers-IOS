@@ -9,6 +9,8 @@ final class MoonWorld {
 
     struct Collider { let x: Float; let z: Float; let r: Float }
     private(set) var colliders: [Collider] = []
+    struct Wall { let a: SIMD2<Float>; let b: SIMD2<Float>; let half: Float }
+    private(set) var walls: [Wall] = []
 
     private struct Crater { let x: Float; let z: Float; let r: Float; let depth: Float }
     private var craters: [Crater] = []
@@ -60,6 +62,10 @@ final class MoonWorld {
         colliders.append(Collider(x: x, z: z, r: r))
     }
 
+    func addWall(_ a: SIMD2<Float>, _ b: SIMD2<Float>, half: Float = 0.18) {
+        walls.append(Wall(a: a, b: b, half: half))
+    }
+
     // MARK: Terrain
 
     private func makeCraters() {
@@ -75,7 +81,7 @@ final class MoonWorld {
             var ok = true
             for (i, c) in Hex.centers.enumerated() {
                 let d = simd_length(SIMD2<Float>(x, z) - c)
-                let clear: Float = i == Hex.home ? 36 : 9
+                let clear: Float = i == Hex.home ? 40 : 22
                 if d < clear + r { ok = false; break }
             }
             if !ok { continue }
@@ -105,7 +111,7 @@ final class MoonWorld {
         var flat: Float = 1
         for (i, c) in Hex.centers.enumerated() {
             let d = simd_length(SIMD2<Float>(x, z) - c)
-            let f = i == Hex.home ? smoothstep(24, 40, d) : smoothstep(5, 11, d)
+            let f = i == Hex.home ? smoothstep(26, 42, d) : smoothstep(13, 21, d)
             flat = min(flat, f)
         }
         return h * flat
@@ -181,32 +187,31 @@ final class MoonWorld {
                            elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
     }
 
-    /// The clean bedrock you uncover: darker, crisper, slightly glossy.
+    /// The clean ground you uncover: pale, smooth "clean silver" with a soft sheen.
     private func makeGroundMaterial() -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .blinn
-        m.diffuse.contents = Tex.tinted(size: 512, tint: SIMD3<Float>(0.90, 0.95, 1.06)) { u, v in
-            let a = Noise.fbmTile(u, v, basePeriod: 5, octaves: 5, seed: 21)
-            let cracks = abs(Noise.fbmTile(u, v, basePeriod: 9, octaves: 3, seed: 23) - 0.5) * 2
-            return 0.24 + 0.16 * a + 0.07 * min(1, cracks * 3)
+        m.diffuse.contents = Tex.tinted(size: 512, tint: SIMD3<Float>(0.97, 0.99, 1.03)) { u, v in
+            let a = Noise.fbmTile(u, v, basePeriod: 4, octaves: 4, seed: 21)
+            let fine = Noise.hash(Int(u * 512), Int(v * 512), 22)
+            return 0.70 + 0.12 * a + 0.03 * fine
         }
-        m.normal.contents = Tex.normal(size: 512, strength: 9) { u, v in
-            let a = Noise.fbmTile(u, v, basePeriod: 7, octaves: 5, seed: 25)
-            let cracks = abs(Noise.fbmTile(u, v, basePeriod: 9, octaves: 3, seed: 23) - 0.5) * 2
-            return a + 0.5 * min(1, cracks * 3)
+        m.normal.contents = Tex.normal(size: 512, strength: 3) { u, v in
+            Noise.fbmTile(u, v, basePeriod: 6, octaves: 4, seed: 25)
         }
-        let tile = SCNMatrix4MakeScale(70, 70, 1)
+        let tile = SCNMatrix4MakeScale(64, 64, 1)
         for p in [m.diffuse, m.normal] {
             p.wrapS = .repeat
             p.wrapT = .repeat
             p.mipFilter = .linear
-            p.maxAnisotropy = 4
+            p.maxAnisotropy = 8
             p.contentsTransform = tile
         }
-        m.specular.contents = UIColor(white: 0.16, alpha: 1)
-        m.shininess = 0.25
+        m.normal.intensity = 0.6
+        m.specular.contents = UIColor(white: 0.22, alpha: 1)
+        m.shininess = 0.4
         m.multiply.contents = Tex.tinted(size: 256, tint: SIMD3<Float>(1, 1, 1)) { u, v in
-            0.8 + 0.2 * Noise.value(u * 9, v * 9, seed: 71)
+            0.86 + 0.14 * Noise.value(u * 9, v * 9, seed: 71)
         }
         m.isDoubleSided = true
         return m
@@ -216,7 +221,7 @@ final class MoonWorld {
 
     private func scatterRocks() {
         var rng = SeededRNG(seed: 0xB0B0)
-        let tones: [CGFloat] = [0.30, 0.36, 0.42, 0.48]
+        let tones: [CGFloat] = [0.26, 0.31, 0.36, 0.42]
         var shapes: [SCNGeometry] = []
         for s in 0..<10 {
             let g = Make.rockGeometry(seed: 200 + s, subdivisions: s < 4 ? 2 : 1)
@@ -240,7 +245,7 @@ final class MoonWorld {
             var ok = true
             for (i, c) in Hex.centers.enumerated() {
                 let d = simd_length(SIMD2<Float>(x, z) - c)
-                if d < (i == Hex.home ? 27 : 7) + scale { ok = false; break }
+                if d < (i == Hex.home ? 30 : 14) + scale { ok = false; break }
             }
             if !ok { continue }
             let big = scale >= 0.7
@@ -267,35 +272,35 @@ final class MoonWorld {
     private func buildGridLines() {
         var verts: [SCNVector3] = []
         var idx: [UInt32] = []
-        let halfW: Float = 0.09
-        for s in 0..<Hex.count {
-            let cs = Hex.corners(s)
-            for k in 0..<6 {
-                let a = cs[k], b = cs[(k + 1) % 6]
-                let len = simd_length(b - a)
-                let dir = (b - a) / len
+        let halfW: Float = 0.035
+        let R = Tile.radius
+        for t in 0..<Tile.slots {
+            let c = Tile.center(t)
+            if !WorldDims.contains(c.x, c.y, margin: 3) { continue }
+            // Three of the six edges; neighbours supply the rest.
+            for k in 0..<3 {
+                let a0 = Float(k) * Float.pi / 3, a1 = Float(k + 1) * Float.pi / 3
+                let a = SIMD2<Float>(c.x + R * cos(a0), c.y + R * sin(a0))
+                let b = SIMD2<Float>(c.x + R * cos(a1), c.y + R * sin(a1))
+                let dir = simd_normalize(b - a)
                 let side = SIMD2<Float>(-dir.y, dir.x) * halfW
-                let steps = Int(len / 1.5)
-                var prev: (SIMD2<Float>, Float)? = nil
-                for t in 0...steps {
-                    let p = a + dir * (len * Float(t) / Float(steps))
-                    if !WorldDims.contains(p.x, p.y, margin: 1) { prev = nil; continue }
-                    let y = height(atX: p.x, z: p.y) + 0.22
-                    if let (q, qy) = prev {
-                        let base = UInt32(verts.count)
-                        verts.append(SCNVector3(q.x - side.x, qy, q.y - side.y))
-                        verts.append(SCNVector3(q.x + side.x, qy, q.y + side.y))
-                        verts.append(SCNVector3(p.x - side.x, y, p.y - side.y))
-                        verts.append(SCNVector3(p.x + side.x, y, p.y + side.y))
-                        idx.append(contentsOf: [base, base + 1, base + 2, base + 2, base + 1, base + 3])
-                    }
-                    prev = (p, y)
+                let pts = [a, (a + b) * 0.5, b]
+                for s in 0..<2 {
+                    let p = pts[s], q = pts[s + 1]
+                    let py = height(atX: p.x, z: p.y) + 0.14
+                    let qy = height(atX: q.x, z: q.y) + 0.14
+                    let base = UInt32(verts.count)
+                    verts.append(SCNVector3(p.x - side.x, py, p.y - side.y))
+                    verts.append(SCNVector3(p.x + side.x, py, p.y + side.y))
+                    verts.append(SCNVector3(q.x - side.x, qy, q.y - side.y))
+                    verts.append(SCNVector3(q.x + side.x, qy, q.y + side.y))
+                    idx.append(contentsOf: [base, base + 1, base + 2, base + 2, base + 1, base + 3])
                 }
             }
         }
         let geo = SCNGeometry(sources: [SCNGeometrySource(vertices: verts)],
                               elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
-        let m = Mat.glow(UIColor(red: 0.3, green: 0.9, blue: 1, alpha: 0.7))
+        let m = Mat.glow(UIColor(red: 0.3, green: 0.9, blue: 1, alpha: 0.75))
         m.isDoubleSided = true
         m.writesToDepthBuffer = false
         geo.materials = [m]
@@ -494,6 +499,20 @@ final class MoonWorld {
                 let d = d2.squareRoot()
                 p.x = c.x + dx / d * minD
                 p.z = c.z + dz / d * minD
+            }
+        }
+        for w in walls {
+            let pt = SIMD2<Float>(p.x, p.z)
+            let ab = w.b - w.a
+            let t = max(0, min(1, simd_dot(pt - w.a, ab) / simd_dot(ab, ab)))
+            let c = w.a + ab * t
+            let d = pt - c
+            let minD = w.half + radius
+            let d2 = simd_dot(d, d)
+            if d2 < minD * minD && d2 > 0.000001 {
+                let len = d2.squareRoot()
+                p.x = c.x + d.x / len * minD
+                p.z = c.y + d.y / len * minD
             }
         }
         let lim = WorldDims.half - 6

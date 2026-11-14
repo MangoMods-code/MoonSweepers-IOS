@@ -66,6 +66,47 @@ enum Hex {
     }
 }
 
+/// The small hexagonal tiles you actually clean (3 m radius, flat-top). Each one is tracked
+/// separately and pays a bonus when it is completely clean.
+enum Tile {
+    static let radius: Float = 3
+    static let qOff = 26
+    static let rOff = 60
+    static let qW = 64
+    static let rH = 128
+    static var slots: Int { qW * rH }
+
+    static func index(_ x: Float, _ z: Float) -> Int {
+        let qf = (2.0 / 3.0 * x) / radius
+        let rf = (-1.0 / 3.0 * x + Float(3).squareRoot() / 3 * z) / radius
+        let yf = -qf - rf
+        var q = qf.rounded(), r = rf.rounded()
+        let y = yf.rounded()
+        let dq = abs(q - qf), dr = abs(r - rf), dy = abs(y - yf)
+        if dq > dr && dq > dy {
+            q = -r - y
+        } else if dr > dy {
+            r = -q - y
+        }
+        let qi = max(0, min(qW - 1, Int(q) + qOff))
+        let ri = max(0, min(rH - 1, Int(r) + rOff))
+        return qi + ri * qW
+    }
+
+    static func center(_ index: Int) -> SIMD2<Float> {
+        let q = Float(index % qW - qOff)
+        let r = Float(index / qW - rOff)
+        return SIMD2<Float>(1.5 * radius * q, Float(3).squareRoot() * radius * (r + q / 2))
+    }
+
+    /// Is (dx, dz) inside a flat-top hexagon of circumradius R centred on the origin?
+    static func inHex(_ dx: Float, _ dz: Float, radius R: Float) -> Bool {
+        let ax = abs(dx), az = abs(dz)
+        let s3 = Float(3).squareRoot()
+        return az <= s3 / 2 * R && s3 * ax + az <= s3 * R
+    }
+}
+
 /// Shared materials and small builders for the station art.
 enum Mat {
     static func solid(_ c: UIColor, spec: CGFloat = 0.25) -> SCNMaterial {
@@ -115,6 +156,55 @@ enum Make {
         let c = SCNCylinder(radius: radius, height: height)
         c.radialSegmentCount = 6
         return c
+    }
+
+    /// Flat-top hexagonal plate (corners on the +X/-X axis), base at y = 0.
+    static func hexPlate(radius: Float, height: Float) -> SCNGeometry {
+        var pos: [SCNVector3] = []
+        var nrm: [SCNVector3] = []
+        var idx: [UInt16] = []
+        var ring: [SIMD2<Float>] = []
+        for k in 0..<6 {
+            let a = Float(k) * Float.pi / 3
+            ring.append(SIMD2<Float>(radius * cos(a), radius * sin(a)))
+        }
+        // Top face (fan).
+        pos.append(SCNVector3(0, height, 0))
+        nrm.append(SCNVector3(0, 1, 0))
+        for p in ring {
+            pos.append(SCNVector3(p.x, height, p.y))
+            nrm.append(SCNVector3(0, 1, 0))
+        }
+        for k in 0..<6 {
+            idx.append(contentsOf: [0, UInt16(1 + (k + 1) % 6), UInt16(1 + k)])
+        }
+        // Sides.
+        for k in 0..<6 {
+            let a = ring[k], b = ring[(k + 1) % 6]
+            let mid = simd_normalize((a + b) * 0.5)
+            let base = UInt16(pos.count)
+            for (p, y) in [(a, height), (b, height), (a, Float(0)), (b, Float(0))] {
+                pos.append(SCNVector3(p.x, y, p.y))
+                nrm.append(SCNVector3(mid.x, 0, mid.y))
+            }
+            idx.append(contentsOf: [base, base + 1, base + 2, base + 2, base + 1, base + 3])
+        }
+        let g = SCNGeometry(sources: [SCNGeometrySource(vertices: pos), SCNGeometrySource(normals: nrm)],
+                            elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
+        return g
+    }
+
+    /// Fixed (non-billboard) sign text, centred, facing +Z.
+    static func sign(_ text: String, size: CGFloat, color: UIColor) -> SCNNode {
+        let t = SCNText(string: text, extrusionDepth: 0.02)
+        t.font = UIFont.systemFont(ofSize: size, weight: .black)
+        t.flatness = 0.1
+        t.materials = [Mat.glow(color)]
+        let node = SCNNode(geometry: t)
+        let (minB, maxB) = node.boundingBox
+        node.pivot = SCNMatrix4MakeTranslation((maxB.x + minB.x) / 2, (maxB.y + minB.y) / 2, 0)
+        node.castsShadow = false
+        return node
     }
 
     static func label(_ text: String, size: CGFloat = 0.42, color: UIColor = .white) -> SCNNode {

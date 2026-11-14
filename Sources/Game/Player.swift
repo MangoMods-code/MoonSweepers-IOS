@@ -10,7 +10,7 @@ final class Player {
     private let capsuleNode = SCNNode()
     private var toolIndex = -1
 
-    var position = SIMD3<Float>(0, 0, 7)
+    var position = SIMD3<Float>(0, 0, 2)
     var velocity = SIMD3<Float>(0, 0, 0)
     var yaw: Float = 0
     var pitch: Float = -0.2
@@ -54,12 +54,10 @@ final class Player {
 
         cameraNode.addChildNode(toolHolder)
 
-        let cap = Make.part(SCNCapsule(capRadius: 0.07, height: 0.26), Mat.orange, 0, 0, 0)
-        cap.eulerAngles = SCNVector3(0.3, 0, 1.2)
+        let cap = Structures.makeCapsule(scale: 1)
+        cap.eulerAngles = SCNVector3(0.35, 0, 1.25)
         capsuleNode.addChildNode(cap)
-        capsuleNode.addChildNode(Make.part(SCNTube(innerRadius: 0.07, outerRadius: 0.076, height: 0.05), Mat.white, 0, 0, 0))
-        capsuleNode.childNodes.last?.eulerAngles = SCNVector3(0.3, 0, 1.2)
-        capsuleNode.position = SCNVector3(-0.36, -0.27, -0.6)
+        capsuleNode.position = SCNVector3(-0.34, -0.2, -0.62)
         capsuleNode.isHidden = true
         Make.noShadows(capsuleNode)
         cameraNode.addChildNode(capsuleNode)
@@ -75,14 +73,15 @@ final class Player {
         guard index != toolIndex else { return }
         toolIndex = index
         toolHolder.childNodes.forEach { $0.removeFromParentNode() }
+        guard index >= 0 else { return }
         let model = ToolModels.make(index)
         if index >= 3 {
             model.position = SCNVector3(0.3, -0.12, 0.25)
             model.eulerAngles = SCNVector3(-0.62, 0.16, 0)
         } else {
             model.scale = SCNVector3(1.5, 1.5, 1.5)
-            model.position = SCNVector3(0.2, -0.17, -0.34)
-            model.eulerAngles = SCNVector3(-0.5, 0.25, 0.1)
+            model.position = SCNVector3(0.21, -0.1, -0.36)
+            model.eulerAngles = SCNVector3(-0.42, 0.3, 0.1)
         }
         toolHolder.addChildNode(model)
     }
@@ -108,6 +107,8 @@ final class Player {
         let cp = cos(pitch)
         return SIMD3<Float>(-sin(yaw) * cp, sin(pitch), -cos(yaw) * cp)
     }
+
+    var isMoving: Bool { simd_length(SIMD2<Float>(velocity.x, velocity.z)) > 0.4 }
 
     func look(dx: Float, dy: Float) {
         yaw -= dx

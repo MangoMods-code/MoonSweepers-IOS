@@ -159,7 +159,7 @@ final class ShopViewController: UIViewController {
             btn.isEnabled = false
         } else if let cost = item.cost {
             let afford = money() >= Double(cost)
-            btn.setTitle(cost == 0 ? "EQUIP" : "BUY  $\(cost)", for: .normal)
+            btn.setTitle(cost == 0 ? "TAKE" : "BUY  $\(cost)", for: .normal)
             btn.tintColor = afford ? .black : UIColor(white: 1, alpha: 0.5)
             btn.backgroundColor = afford ? UIColor(red: 0.45, green: 1, blue: 0.55, alpha: 1) : UIColor(white: 1, alpha: 0.1)
             btn.isEnabled = afford

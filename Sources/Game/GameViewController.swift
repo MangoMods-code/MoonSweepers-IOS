@@ -34,6 +34,10 @@ final class GameViewController: UIViewController {
     private var lastMoneyShown = -1
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
+    private func buzz(_ intensity: CGFloat) {
+        if save.hapticsOn { haptic.impactOccurred(intensity: intensity) }
+    }
+
     // HUD
     private let joystick = JoystickView()
     private let lookPad = LookPad()
@@ -62,7 +66,7 @@ final class GameViewController: UIViewController {
     private var hudViews: [UIView] = []
 
     private enum UseAction: Equatable {
-        case none, deposit(Int), unload(Int), wall, matrix, garage, drive, exitVehicle, flag(Int)
+        case none, deposit(Int), sellTray(Int), unload(Int), wall, matrix, garage, drive, exitVehicle, flag(Int)
     }
     private var useAction: UseAction = .none
 
@@ -173,7 +177,7 @@ final class GameViewController: UIViewController {
         player.maxFuel = save.jetFuel
         player.setTool(save.currentTool)
         player.setLamp(level: save.lampLens)
-        structures.refresh(save)
+        structures.refresh(save, dust: dust)
         nvButton.isHidden = !save.hasNightVision || !titleOverlay.isHidden
         if !save.hasNightVision && nightVisionOn { setNightVision(false) }
 
@@ -206,7 +210,7 @@ final class GameViewController: UIViewController {
     }
 
     private func addBot(_ kind: SweepBot.Kind, index: Int) {
-        var p = structures.botDock + SIMD3<Float>(Float(index) * 1.4, 0, kind == .joonas ? 5 : 0)
+        var p = structures.botDock + (kind == .joonas ? SIMD3<Float>(Float(index) * 4, 0, 7) : SIMD3<Float>(Float(index) * 1.3, 0, 0))
         p.y = world.height(atX: p.x, z: p.z)
         let bot = SweepBot(kind: kind, index: index, start: p)
         bot.onDeliver = { [weak self] kg, from in
@@ -422,7 +426,8 @@ final class GameViewController: UIViewController {
 
     private func applyLook(_ dx: CGFloat, _ dy: CGFloat) {
         guard !paused else { return }
-        player.look(dx: Float(dx) * 0.0052, dy: Float(dy) * 0.0052)
+        let k = 0.0052 * save.sensitivity
+        player.look(dx: Float(dx) * k, dy: Float(dy) * k * (save.invertY ? -1 : 1))
     }
 
     private func setNightVision(_ on: Bool) {
@@ -483,7 +488,7 @@ final class GameViewController: UIViewController {
             b.backgroundColor = primary ? UIColor(red: 0.96, green: 0.52, blue: 0.14, alpha: 1) : UIColor(white: 1, alpha: 0.16)
             b.layer.cornerRadius = 12
             b.addAction(UIAction { _ in action() }, for: .touchUpInside)
-            b.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            b.widthAnchor.constraint(equalToConstant: 190).isActive = true
             b.heightAnchor.constraint(equalToConstant: 50).isActive = true
             return b
         }
@@ -494,6 +499,7 @@ final class GameViewController: UIViewController {
         } else {
             buttons.append(makeButton("START SHIFT", primary: true) { [weak self] in self?.startGame(fresh: true) })
         }
+        buttons.append(makeButton("SETTINGS", primary: false) { [weak self] in self?.openSettings(thenResume: false) })
         let row = UIStackView(arrangedSubviews: buttons)
         row.axis = .horizontal
         row.spacing = 16
@@ -508,6 +514,7 @@ final class GameViewController: UIViewController {
             stack.centerXAnchor.constraint(equalTo: titleOverlay.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: titleOverlay.centerYAnchor),
         ])
+        paused = true
         hudViews.forEach { $0.isHidden = true }
         let extras: [UIView] = [nvButton, packButton, useButton, fuelMeter, waypointLabel]
         extras.forEach { $0.isHidden = true }
@@ -543,37 +550,68 @@ final class GameViewController: UIViewController {
         paused = false
         lastTime = 0
         if save.tutorialStep == 0 {
-            toast("Look down at the dusty ground and hold SCRUB.", duration: 4)
+            toast("Welcome to N Station. Take the free Toothbrush from the SUPPLY WALL on your left.", duration: 5)
         } else {
             toast(String(format: "Back on shift. The Moon is %.2f%% clean.", dust.cleanFraction * 100))
         }
     }
 
     private func showMenu() {
+        guard !paused else { return }
         paused = true
         scrubHeld = false
-        let msg = String(format: "Moon cleaned: %.2f%%\nDust shipped: %.0f kg\nTotal earned: %@",
-                         dust.cleanFraction * 100, save.kgSold, ShopViewController.dollars(save.totalEarned))
-        let a = UIAlertController(title: "Paused", message: msg, preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "Resume", style: .cancel) { [weak self] _ in self?.resume() })
-        a.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
-            self?.writeSave(); self?.resume(); self?.toast("Progress saved.")
-        })
-        a.addAction(UIAlertAction(title: save.soundOn ? "Sound: On" : "Sound: Off", style: .default) { [weak self] _ in
+        Sfx.shared.play("click")
+        let menu = MenuViewController()
+        menu.modalPresentationStyle = .overFullScreen
+        menu.modalTransitionStyle = .crossDissolve
+        menu.stats = String(format: "Moon cleaned  %.3f%%\nDust shipped  %.0f kg\nTotal earned  %@\nStations  %d / 12\nFlags  %d / %d",
+                            dust.cleanFraction * 100, save.kgSold, ShopViewController.dollars(save.totalEarned),
+                            save.stationsFound.filter { $0 }.count,
+                            save.flagsClaimed.filter { $0 }.count, save.flagsClaimed.count)
+        menu.buttons = [
+            .init(title: "RESUME", style: .primary) { [weak self] in self?.resume() },
+            .init(title: "SETTINGS", style: .normal) { [weak self] in self?.openSettings(thenResume: true) },
+            .init(title: "MOON MAP", style: .normal) { [weak self] in self?.paused = false; self?.openMap() },
+            .init(title: "SAVE GAME", style: .normal) { [weak self] in
+                self?.writeSave(); self?.resume(); self?.toast("Progress saved.")
+            },
+            .init(title: "MAIN MENU", style: .normal) { [weak self] in
+                self?.writeSave(); self?.buildTitle()
+            },
+            .init(title: "START OVER", style: .danger) { [weak self] in self?.confirmNewGame() },
+        ]
+        present(menu, animated: true)
+    }
+
+    private func openSettings(thenResume: Bool) {
+        let vc = SettingsViewController()
+        vc.modalPresentationStyle = .overFullScreen
+        vc.modalTransitionStyle = .crossDissolve
+        vc.values = SettingsViewController.Values(soundOn: save.soundOn, hapticsOn: save.hapticsOn,
+                                                  highGraphics: save.highGraphics, invertY: save.invertY,
+                                                  sensitivity: save.sensitivity, gridOn: save.gridOn)
+        vc.onChange = { [weak self] v in
             guard let self = self else { return }
-            self.save.soundOn.toggle()
-            Sfx.shared.enabled = self.save.soundOn
-            self.resume()
-        })
-        a.addAction(UIAlertAction(title: save.highGraphics ? "Graphics: High" : "Graphics: Performance", style: .default) { [weak self] _ in
+            let gfxChanged = v.highGraphics != self.save.highGraphics
+            self.save.soundOn = v.soundOn
+            self.save.hapticsOn = v.hapticsOn
+            self.save.highGraphics = v.highGraphics
+            self.save.invertY = v.invertY
+            self.save.sensitivity = v.sensitivity
+            self.save.gridOn = v.gridOn
+            Sfx.shared.enabled = v.soundOn
+            self.world.gridNode.isHidden = !v.gridOn
+            self.gridButton.title = v.gridOn ? "GRID●" : "GRID"
+            if gfxChanged { self.applyGraphics() }
+        }
+        vc.onClose = { [weak self] in
             guard let self = self else { return }
-            self.save.highGraphics.toggle()
-            self.applyGraphics()
-            self.resume()
-            self.toast(self.save.highGraphics ? "High graphics: shadows, bloom, ambient occlusion." : "Performance mode: lighter effects.")
-        })
-        a.addAction(UIAlertAction(title: "Start over", style: .destructive) { [weak self] _ in self?.confirmNewGame() })
-        present(a, animated: true)
+            if thenResume {
+                self.writeSave()
+                self.resume()
+            }
+        }
+        present(vc, animated: true)
     }
 
     private func resume() {
@@ -584,7 +622,7 @@ final class GameViewController: UIViewController {
     // MARK: Cleaning loop
 
     @objc private func cycleTool() {
-        guard !paused, !driving else { return }
+        guard !paused, !driving, save.hasTool else { return }
         var i = save.currentTool
         for _ in 0..<Catalog.tools.count {
             i = (i + 1) % Catalog.tools.count
@@ -601,7 +639,7 @@ final class GameViewController: UIViewController {
         let room = save.capsuleCapacity - save.capsuleLoad
         if room <= 0.001 {
             if manual || tipCooldown <= 0 {
-                toast("Capsule full — carry it to a DEPOT.")
+                toast("Capsule full — carry it back to a station.")
                 tipCooldown = 4
             }
             return
@@ -610,10 +648,10 @@ final class GameViewController: UIViewController {
         save.toolLoad -= moved
         save.capsuleLoad += moved
         Sfx.shared.play("pack")
-        haptic.impactOccurred(intensity: 0.8)
-        if save.tutorialStep == 1 {
-            save.tutorialStep = 2
-            toast("Capsule packed. Carry it to the DEPOT and tap DEPOSIT.", duration: 4)
+        buzz(0.8)
+        if save.tutorialStep == 2 {
+            save.tutorialStep = 3
+            toast("Capsule packed. Carry it to the orange DEPOSIT intake inside the station.", duration: 4)
         }
     }
 
@@ -628,7 +666,7 @@ final class GameViewController: UIViewController {
         Sfx.shared.play("cash", volume: announce ? 1 : 0.35)
         if announce {
             Sfx.shared.play("launch", volume: 0.7)
-            haptic.impactOccurred(intensity: 1)
+            buzz(1)
             var text = String(format: "Shipment launched: %.1f kg  →  +%@", kg, ShopViewController.dollars(value.rounded(.up)))
             if night && !save.hasBattery && (save.hasChamber || save.hasPress) {
                 text += "\nMachines are unpowered at night (raw dust price)."
@@ -641,18 +679,22 @@ final class GameViewController: UIViewController {
     private func useTapped() {
         guard !paused else { return }
         switch useAction {
-        case .deposit(let s):
+        case .deposit:
             let kg = save.capsuleLoad + save.toolLoad
-            if kg <= 0.0005 {
-                toast("Nothing to deposit yet — go sweep some dust.")
-                Sfx.shared.play("deny")
-                return
-            }
+            guard kg > 0.0005 else { return }
             save.capsuleLoad = 0
             save.toolLoad = 0
+            save.trayKg += kg
+            Sfx.shared.play("pack")
+            buzz(0.8)
+            toast(String(format: "%.2f kg in the tray. Tap SELL to launch the shipment.", save.trayKg))
+        case .sellTray(let s):
+            let kg = save.trayKg
+            guard kg > 0.0005 else { return }
+            save.trayKg = 0
             sell(kg: kg, station: s, announce: true)
-            if save.tutorialStep <= 2 {
-                save.tutorialStep = 3
+            if save.tutorialStep <= 3 {
+                save.tutorialStep = 4
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self] in
                     self?.toast("Spend it at the SUPPLY WALL — the Nail Brush is only $5.", duration: 4)
                 }
@@ -671,9 +713,9 @@ final class GameViewController: UIViewController {
             save.flagsClaimed[i] = true
             save.money += Double(Catalog.flagReward)
             save.totalEarned += Double(Catalog.flagReward)
-            structures.refresh(save)
+            structures.refresh(save, dust: dust)
             Sfx.shared.play("claim")
-            haptic.impactOccurred(intensity: 1)
+            buzz(1)
             let n = save.flagsClaimed.filter { $0 }.count
             toast("Flag claimed for the L.S.D.  +$\(Catalog.flagReward)   (\(n)/\(save.flagsClaimed.count))")
             bumpMoney()
@@ -719,8 +761,11 @@ final class GameViewController: UIViewController {
         save.money -= Double(cost)
         apply(&save)
         applyUpgrades()
+        if save.tutorialStep == 0 && save.hasTool {
+            save.tutorialStep = 1
+        }
         Sfx.shared.play(cost == 0 ? "click" : "cash", volume: 0.7)
-        haptic.impactOccurred(intensity: 1)
+        buzz(1)
     }
 
     private func gear(_ title: String, _ detail: String, cost: Int, owned: Bool, locked: String? = nil,
@@ -776,6 +821,8 @@ final class GameViewController: UIViewController {
             build.append(gear("Robot Vacuum  (\(save.vacuums)/\(Catalog.maxVacuums))", "Cleans a fixed radius around the station and drives its dust home.",
                               cost: Catalog.vacuumCost, owned: save.vacuums >= Catalog.maxVacuums,
                               locked: save.hasPackager ? nil : "NEEDS PACKAGER") { $0.vacuums += 1 })
+            build.append(gear("Garage", "Builds a garage beside the station where you buy and park cleaning vehicles.",
+                              cost: Catalog.garageCost, owned: save.hasGarage) { $0.hasGarage = true })
             build.append(gear("Capsule Catcher", "Catches capsules fired by J.O.O.N.A.S.", cost: Catalog.catcherCost,
                               owned: save.hasCatcher) { $0.hasCatcher = true })
             build.append(gear("J.O.O.N.A.S.  (\(save.joonas)/\(Catalog.maxJoonas))", "Roams every dirty sector on its own and fires capsules home.",
@@ -796,11 +843,10 @@ final class GameViewController: UIViewController {
     }
 
     private func garageSections() -> [ShopViewController.Section] {
-        var items = [gear("Garage", "A place to buy and park cleaning vehicles.", cost: Catalog.garageCost, owned: save.hasGarage) { $0.hasGarage = true }]
+        var items: [ShopViewController.Item] = []
         for (i, v) in Catalog.vehicles.enumerated() {
             let detail = String(format: "Sweeps a %.1f m strip · %.0f kg hopper · %.0f m/s", v.width, v.capacity, v.speed)
-            let owned = save.vehicleLevel >= i
-            items.append(gear(v.name, detail, cost: v.cost, owned: owned, locked: save.hasGarage ? nil : "NEEDS GARAGE") {
+            items.append(gear(v.name, detail, cost: v.cost, owned: save.vehicleLevel >= i) {
                 $0.vehicleLevel = i
                 $0.hasVehiclePos = false
             })
@@ -829,11 +875,14 @@ final class GameViewController: UIViewController {
             shop.sections = { [weak self] in self?.garageSections() ?? [] }
         }
         shop.onClose = { [weak self] in
-            self?.writeSave()
-            self?.resume()
+            guard let self = self else { return }
+            self.writeSave()
+            self.resume()
+            if self.save.tutorialStep == 1 {
+                self.toast("Head out the door and hold SCRUB on the dusty ground.", duration: 4)
+            }
         }
         present(shop, animated: true)
-        if save.tutorialStep == 3 { save.tutorialStep = 4 }
     }
 
     private func openMap() {
@@ -868,7 +917,7 @@ final class GameViewController: UIViewController {
         }
         map.onTeleport = { [weak self] i in
             guard let self = self else { return }
-            var p = i == Hex.home ? SIMD3<Float>(0, 0, 7) : self.structures.stationPos[i] + SIMD3<Float>(-1.3, 0, 1.4)
+            var p = self.structures.spawnPos(i)
             p.y = self.world.height(atX: p.x, z: p.z)
             self.player.position = p
             self.player.velocity = .zero
@@ -946,7 +995,12 @@ final class GameViewController: UIViewController {
                 let ringR = radius + 0.1
                 aimRing.simdScale = SIMD3<Float>(ringR, 1, ringR)
                 brushPuffNode.simdPosition = aim + SIMD3<Float>(0, 0.06, 0)
-                if scrubHeld {
+                if scrubHeld && !save.hasTool {
+                    if tipCooldown <= 0 {
+                        toast("You have no tool yet — take the free Toothbrush from the SUPPLY WALL.")
+                        tipCooldown = 4
+                    }
+                } else if scrubHeld {
                     if cap - save.toolLoad <= 0.001 {
                         if save.autoPacker > 0 {
                             pack(manual: false)
@@ -961,8 +1015,8 @@ final class GameViewController: UIViewController {
                         if got > 0 {
                             collecting = true
                             save.toolLoad += got
-                            if save.tutorialStep == 0 {
-                                save.tutorialStep = 1
+                            if save.tutorialStep <= 1 {
+                                save.tutorialStep = 2
                                 toast("Dust fills your tool. When it's full, tap PACK.", duration: 4)
                             }
                         }
@@ -972,20 +1026,33 @@ final class GameViewController: UIViewController {
                 aimRing.isHidden = true
             }
             brushPuff.birthRate = collecting ? CGFloat(40 + radius * 160) : 0
-            player.animateTool(dt: dt, scrubbing: scrubHeld)
+            aimRing.isHidden = aimRing.isHidden || !save.hasTool
+            player.animateTool(dt: dt, scrubbing: scrubHeld && save.hasTool)
         }
         jumpQueued = false
 
         if collecting {
             hapticTimer -= dt
             if hapticTimer <= 0 {
-                haptic.impactOccurred(intensity: 0.35)
+                buzz(0.35)
                 hapticTimer = 0.12
             }
         }
 
         for bot in bots {
-            bot.update(dt: dt, world: world, dust: dust, home: structures.depotPos, dock: structures.botDock)
+            bot.update(dt: dt, world: world, dust: dust, home: structures.stationPos[Hex.home], dock: structures.botDock)
+        }
+
+        let sealed = dust.drainCompleted()
+        if !sealed.isEmpty {
+            let bonus = Double(sealed.count * Catalog.hexReward)
+            save.money += bonus
+            save.totalEarned += bonus
+            if collecting {
+                Sfx.shared.play("claim", volume: 0.45)
+                toast("Hex clean!  L.S.D. bonus +$\(Int(bonus))", duration: 1.6)
+                bumpMoney()
+            }
         }
 
         updateContext()
@@ -1026,28 +1093,43 @@ final class GameViewController: UIViewController {
             title = "EXIT"
             if save.vehicleLoad > 0.01 {
                 let vp = SIMD2<Float>(v.position.x, v.position.z)
-                for (i, s) in structures.stationPos.enumerated() where save.stationsFound[i] {
-                    if simd_length(vp - SIMD2<Float>(s.x, s.z)) < 9 + v.tier.length / 2 {
-                        action = .unload(i)
-                        title = "UNLOAD"
-                        break
-                    }
+                let i = Hex.nearest(vp.x, vp.y)
+                let s = structures.stationPos[i]
+                if save.stationsFound[i] && simd_length(vp - SIMD2<Float>(s.x, s.z)) < 14 + v.tier.length / 2 {
+                    action = .unload(i)
+                    title = "UNLOAD"
                 }
             }
         } else {
             for (i, f) in structures.flagPos.enumerated() where !save.flagsClaimed[i] {
                 if near(f, 2.8) { action = .flag(i); title = "CLAIM FLAG"; break }
             }
-            if action == .none {
-                for (i, s) in structures.stationPos.enumerated() where save.stationsFound[i] {
-                    if near(s, i == Hex.home ? 4.4 : 3.6) { action = .deposit(i); title = "DEPOSIT"; break }
+            let st = Hex.nearest(pp.x, pp.y)
+            if action == .none && save.stationsFound[st] && near(structures.stationPos[st], 9) {
+                if near(structures.intakePos(st), 2.4) {
+                    if save.capsuleLoad + save.toolLoad > 0.0005 {
+                        action = .deposit(st)
+                        title = "DEPOSIT"
+                    } else if save.trayKg > 0.0005 {
+                        action = .sellTray(st)
+                        title = String(format: "SELL %.1f KG", save.trayKg)
+                    }
+                } else if near(structures.wallUsePos(st), 2.4) {
+                    action = .wall
+                    title = "SUPPLY WALL"
+                } else if near(structures.matrixUsePos(st), 2.3) {
+                    action = .matrix
+                    title = "UPGRADES"
                 }
             }
             if action == .none {
-                if near(structures.wallPos, 4.6) { action = .wall; title = "SUPPLY WALL" }
-                else if near(structures.matrixPos, 3.8) { action = .matrix; title = "UPGRADES" }
-                else if near(structures.garagePos + SIMD3<Float>(4.6, 0, 5), 3.6) { action = .garage; title = "GARAGE" }
-                else if let v = vehicle, near(v.position, v.tier.length / 2 + 2.6) { action = .drive; title = "DRIVE" }
+                if save.hasGarage && near(structures.garagePos, 4.2) {
+                    action = .garage
+                    title = "GARAGE"
+                } else if let v = vehicle, near(v.position, v.tier.length / 2 + 2.6) {
+                    action = .drive
+                    title = "DRIVE"
+                }
             }
         }
         useAction = action
@@ -1062,13 +1144,14 @@ final class GameViewController: UIViewController {
     /// Twice a second: discoveries, sector completion, night hints.
     private func slowChecks() {
         let pp = SIMD2<Float>(player.position.x, player.position.z)
+        structures.lightStation(Hex.nearest(pp.x, pp.y))
         for (i, s) in structures.stationPos.enumerated() where !save.stationsFound[i] {
-            if simd_length(pp - SIMD2<Float>(s.x, s.z)) < 10 {
+            if simd_length(pp - SIMD2<Float>(s.x, s.z)) < 16 {
                 save.stationsFound[i] = true
-                structures.refresh(save)
+                structures.refresh(save, dust: dust)
                 Sfx.shared.play("claim")
                 let n = save.stationsFound.filter { $0 }.count
-                toast("Station \(String(format: "%02d", i + 1)) discovered — depot and fast travel online.  (\(n)/12)", duration: 3.5)
+                toast("Station \(String(format: "%02d", i + 1)) discovered — selling, upgrades and fast travel online.  (\(n)/12)", duration: 3.5)
             }
         }
         for i in 0..<Hex.count where !save.sectorsDone[i] && dust.sectorClean(i) >= 0.99 {
@@ -1093,7 +1176,9 @@ final class GameViewController: UIViewController {
             moneyLabel.text = ShopViewController.dollars(save.money)
         }
         let sec = Hex.nearest(player.position.x, player.position.z)
-        sectorLabel.text = String(format: "SECTOR %02d · %@ · %.1f%%", sec + 1, Hex.names[sec].uppercased(), dust.sectorClean(sec) * 100)
+        sectorLabel.text = String(format: "HEX %.0f%%  ·  SECTOR %02d · %@ · %.1f%%",
+                                  dust.tileClean(atX: player.position.x, z: player.position.z) * 100,
+                                  sec + 1, Hex.names[sec].uppercased(), dust.sectorClean(sec) * 100)
         let mult = save.processing(night: world.isNight)
         let product = mult >= 7 ? "MOONSTONE ×7" : (mult >= 3 ? "MOON SAND ×3" : "RAW DUST")
         moonLabel.text = String(format: "MOON %.3f%% CLEAN · %@ · %@", dust.cleanFraction * 100,
@@ -1103,11 +1188,13 @@ final class GameViewController: UIViewController {
             toolName.text = v.tier.name.uppercased()
             toolMeter.fraction = CGFloat(save.vehicleLoad / v.tier.capacity)
             toolMeter.caption = String(format: "HOPPER %.0f / %.0f kg", save.vehicleLoad, v.tier.capacity)
+            toolMeter.isHidden = false
             capsuleMeter.isHidden = true
         } else {
             let cap = save.toolCapacity
             let owned = save.toolsOwned.filter { $0 }.count
-            toolName.text = save.tool.name.uppercased() + (owned > 1 ? "   ⇄" : "")
+            toolName.text = save.hasTool ? save.tool.name.uppercased() + (owned > 1 ? "   ⇄" : "") : "NO TOOL"
+            toolMeter.isHidden = !save.hasTool
             toolMeter.fraction = CGFloat(save.toolLoad / cap)
             toolMeter.caption = String(format: "TOOL %.2f / %.1f kg", save.toolLoad, cap)
             capsuleMeter.isHidden = false

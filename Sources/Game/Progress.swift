@@ -56,6 +56,7 @@ enum Catalog {
     static let pricePerKg: Double = 2
     static let flagReward = 100
     static let sectorReward = 500
+    static let hexReward = 5
 
     static let bootsCost = 60
     static let jetpackCost = 200
@@ -78,8 +79,9 @@ struct SaveData: Codable {
     var totalEarned: Double = 0
     var kgSold: Double = 0
 
-    var toolsOwned: [Bool] = [true, false, false, false, false, false]
-    var currentTool = 0
+    var toolsOwned: [Bool] = [false, false, false, false, false, false]
+    var currentTool = -1
+    var trayKg: Float = 0
     var toolLoad: Float = 0
     var capsuleLoad: Float = 0
 
@@ -119,7 +121,7 @@ struct SaveData: Codable {
 
     var px: Float = 0
     var py: Float = 0
-    var pz: Float = 7
+    var pz: Float = 2
     var yaw: Float = 0
     var pitch: Float = -0.2
     var timeOfDay: Float = 0.06
@@ -132,9 +134,13 @@ struct SaveData: Codable {
     var soundOn = true
     var highGraphics = true
     var gridOn = false
+    var hapticsOn = true
+    var invertY = false
+    var sensitivity: Float = 1
 
     // Derived stats
-    var tool: HandTool { Catalog.tools[currentTool] }
+    var hasTool: Bool { currentTool >= 0 }
+    var tool: HandTool { Catalog.tools[max(0, currentTool)] }
     var toolCapacity: Float { tool.capacity * (1 + 0.2 * Float(compactor)) }
     var toolRadius: Float { tool.width / 2 * (1 + 0.15 * Float(wideHeads)) }
     var toolRate: Float { tool.rate * (1 + 0.2 * Float(bristles)) }
@@ -155,11 +161,12 @@ struct SaveData: Codable {
 }
 
 enum SaveManager {
-    private static let key = "moonsweepers.save.v2"
+    private static let ioQueue = DispatchQueue(label: "moonsweepers.save", qos: .utility)
+    private static let key = "moonsweepers.save.v3"
 
     private static var maskURL: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("dustmask-v2.bin")
+        return dir.appendingPathComponent("dustmask-v3.bin")
     }
 
     static var hasSave: Bool { UserDefaults.standard.data(forKey: key) != nil }
@@ -178,11 +185,16 @@ enum SaveManager {
         if let data = try? JSONEncoder().encode(s) {
             UserDefaults.standard.set(data, forKey: key)
         }
-        try? Data(mask).write(to: maskURL, options: .atomic)
+        // The dust mask is a few MB, so write it off the main thread.
+        let url = maskURL
+        ioQueue.async {
+            try? Data(mask).write(to: url, options: .atomic)
+        }
     }
 
     static func wipe() {
         UserDefaults.standard.removeObject(forKey: key)
-        try? FileManager.default.removeItem(at: maskURL)
+        let url = maskURL
+        ioQueue.sync { try? FileManager.default.removeItem(at: url) }
     }
 }
