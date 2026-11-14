@@ -7,9 +7,11 @@ final class MoonWorld {
     let grid = 256
     private(set) var heights: [Float] = []
 
-    struct Collider { let x: Float; let z: Float; let r: Float }
+    struct Collider { let x: Float; let z: Float; let r: Float; let group: Int }
     private(set) var colliders: [Collider] = []
-    struct Wall { let a: SIMD2<Float>; let b: SIMD2<Float>; let half: Float }
+    struct Wall { let a: SIMD2<Float>; let b: SIMD2<Float>; let half: Float; let group: Int }
+    /// Collision groups (one per station) that are switched off because nothing is built there.
+    var disabledGroups = Set<Int>()
     private(set) var walls: [Wall] = []
 
     private struct Crater { let x: Float; let z: Float; let r: Float; let depth: Float }
@@ -58,12 +60,12 @@ final class MoonWorld {
         updateSun(dt: 0)
     }
 
-    func addCollider(x: Float, z: Float, r: Float) {
-        colliders.append(Collider(x: x, z: z, r: r))
+    func addCollider(x: Float, z: Float, r: Float, group: Int = -1) {
+        colliders.append(Collider(x: x, z: z, r: r, group: group))
     }
 
-    func addWall(_ a: SIMD2<Float>, _ b: SIMD2<Float>, half: Float = 0.18) {
-        walls.append(Wall(a: a, b: b, half: half))
+    func addWall(_ a: SIMD2<Float>, _ b: SIMD2<Float>, half: Float = 0.18, group: Int = -1) {
+        walls.append(Wall(a: a, b: b, half: half, group: group))
     }
 
     // MARK: Terrain
@@ -492,6 +494,7 @@ final class MoonWorld {
     /// Pushes a point out of obstacles and keeps it on the map.
     func resolveCollisions(_ p: inout SIMD3<Float>, radius: Float) {
         for c in colliders {
+            if c.group >= 0 && disabledGroups.contains(c.group) { continue }
             let dx = p.x - c.x, dz = p.z - c.z
             let minD = c.r + radius
             let d2 = dx * dx + dz * dz
@@ -502,6 +505,7 @@ final class MoonWorld {
             }
         }
         for w in walls {
+            if w.group >= 0 && disabledGroups.contains(w.group) { continue }
             let pt = SIMD2<Float>(p.x, p.z)
             let ab = w.b - w.a
             let t = max(0, min(1, simd_dot(pt - w.a, ab) / simd_dot(ab, ab)))

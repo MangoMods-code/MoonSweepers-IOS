@@ -62,7 +62,7 @@ final class DustField {
                 let k = j * n + i
                 tiles[k] = UInt16(Tile.index(x, z))
                 // No dust on station foundations.
-                let c = Hex.centers[Hex.nearest(x, z)]
+                let c = Hex.centers[Hex.home]
                 if Tile.inHex(x - c.x, z - c.y, radius: padR) { continue }
                 let thick = 0.75 + 0.25 * Noise.value(Float(i) / 72, Float(j) / 72, seed: 11)
                 freshMask[k] = UInt8(255 * thick)
@@ -126,11 +126,6 @@ final class DustField {
             p.maxAnisotropy = 8
             p.contentsTransform = tileXf
         }
-        material.multiply.contents = Tex.tinted(size: 256, tint: SIMD3<Float>(1, 1, 1)) { u, v in
-            let a = Noise.value(u * 7, v * 7, seed: 61)
-            let b = Noise.value(u * 23, v * 23, seed: 62)
-            return 0.8 + 0.14 * a + 0.08 * b
-        }
         material.transparencyMode = .aOne
         material.isDoubleSided = true
         material.writesToDepthBuffer = false
@@ -145,6 +140,11 @@ final class DustField {
             material.transparent.wrapS = .clamp
             material.transparent.wrapT = .clamp
             material.transparent.mipFilter = .none
+            // The same texture's colour channels darken a rim along every dust edge.
+            material.multiply.contents = t
+            material.multiply.wrapS = .clamp
+            material.multiply.wrapT = .clamp
+            material.multiply.mipFilter = .none
         }
     }
 
@@ -157,17 +157,42 @@ final class DustField {
         upload(0, 0, res - 1, res - 1)
     }
 
-    private func upload(_ i0: Int, _ j0: Int, _ i1: Int, _ j1: Int) {
-        guard let t = texture, i0 <= i1, j0 <= j1 else { return }
+    /// Uploads a region of the mask. Alpha is all-or-nothing (a crisp edge) and the colour
+    /// channels draw a dark border line on every dust cell that touches clean ground.
+    private func upload(_ a0: Int, _ b0: Int, _ a1: Int, _ b1: Int) {
+        guard let t = texture, a0 <= a1, b0 <= b1 else { return }
+        let i0 = max(0, a0 - 2), j0 = max(0, b0 - 2)
+        let i1 = min(res - 1, a1 + 2), j1 = min(res - 1, b1 + 2)
         let w = i1 - i0 + 1, h = j1 - j0 + 1
+        let n = res
         var buf = [UInt8](repeating: 255, count: w * h * 4)
         mask.withUnsafeBufferPointer { m in
             for j in 0..<h {
-                let row = (j0 + j) * res + i0
+                let y = j0 + j
                 for i in 0..<w {
-                    // Crisp edge: anything more than a thin film reads as solid dust.
-                    let v = Int(m[row + i])
-                    buf[(j * w + i) * 4 + 3] = v == 0 ? 0 : UInt8(min(255, 70 + v * 3))
+                    let x = i0 + i
+                    let k = (j * w + i) * 4
+                    if m[y * n + x] == 0 {
+                        buf[k + 3] = 0
+                        continue
+                    }
+                    // Distance (in cells, up to 2) to the nearest clean cell.
+                    var near = 3
+                    for dy in -2...2 {
+                        let yy = y + dy
+                        if yy < 0 || yy >= n { continue }
+                        for dx in -2...2 {
+                            let xx = x + dx
+                            if xx < 0 || xx >= n { continue }
+                            if m[yy * n + xx] == 0 {
+                                near = min(near, max(abs(dx), abs(dy)))
+                            }
+                        }
+                    }
+                    let shade: UInt8 = near == 1 ? 26 : (near == 2 ? 120 : 255)
+                    buf[k] = shade
+                    buf[k + 1] = shade
+                    buf[k + 2] = shade
                 }
             }
         }
@@ -176,6 +201,29 @@ final class DustField {
                 t.replace(region: MTLRegionMake2D(i0, j0, w, h), mipmapLevel: 0, withBytes: base, bytesPerRow: w * 4)
             }
         }
+    }
+
+    /// Removes all dust inside a flat-top hexagon (under a newly built station).
+    func clearHex(x: Float, z: Float, radius: Float) {
+        let (ia, ja) = cell(x - radius, z - radius)
+        let (ib, jb) = cell(x + radius, z + radius)
+        let i0 = max(0, ia), i1 = min(res - 1, ib)
+        let j0 = max(0, ja), j1 = min(res - 1, jb)
+        guard i0 <= i1, j0 <= j1 else { return }
+        var changed = false
+        for j in j0...j1 {
+            let cz = WorldDims.minZ + (Float(j) + 0.5) * cellSize - z
+            for i in i0...i1 {
+                let cx = WorldDims.minX + (Float(i) + 0.5) * cellSize - x
+                let idx = j * res + i
+                if mask[idx] > 0 && Tile.inHex(cx, cz, radius: radius) {
+                    remove(idx, Int(mask[idx]))
+                    mask[idx] = 0
+                    changed = true
+                }
+            }
+        }
+        if changed { upload(i0, j0, i1, j1) }
     }
 
     private func cell(_ x: Float, _ z: Float) -> (Int, Int) {
@@ -305,7 +353,7 @@ final class DustField {
                 let want = min(Float(cur), maxRemove * fall) * scale + carry
                 var take = Int(want)
                 carry = want - Float(take)
-                if cur <= 10 && scale >= 1 { take = Int(cur) }
+                if cur <= 48 && scale >= 1 { take = Int(cur) }
                 take = min(take, Int(cur))
                 if take > 0 {
                     mask[idx] = cur - UInt8(take)

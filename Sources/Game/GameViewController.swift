@@ -807,7 +807,7 @@ final class GameViewController: UIViewController {
             gear("Night Vision Goggles", "Nights look like day, without shadows. Toggle with NV.", cost: Catalog.nightVisionCost, owned: save.hasNightVision) { $0.hasNightVision = true },
         ]
         var build = [
-            gear("Building Tool", "Unlocks machines, robots and the Capsule Catcher.", cost: Catalog.buildToolCost, owned: save.hasBuildTool) { $0.hasBuildTool = true },
+            gear("Building Tool", "Unlocks machines, robots, the Garage, and new stations (built from the Moon Map).", cost: Catalog.buildToolCost, owned: save.hasBuildTool) { $0.hasBuildTool = true },
         ]
         if save.hasBuildTool {
             build.append(gear("Packager", "Conveyor line into the Depot. Needed for machines and Robot Vacuums.",
@@ -821,7 +821,7 @@ final class GameViewController: UIViewController {
             build.append(gear("Robot Vacuum  (\(save.vacuums)/\(Catalog.maxVacuums))", "Cleans a fixed radius around the station and drives its dust home.",
                               cost: Catalog.vacuumCost, owned: save.vacuums >= Catalog.maxVacuums,
                               locked: save.hasPackager ? nil : "NEEDS PACKAGER") { $0.vacuums += 1 })
-            build.append(gear("Garage", "Builds a garage beside the station where you buy and park cleaning vehicles.",
+            build.append(gear("Garage", "Builds a garage beside N Station where you buy and park cleaning vehicles.",
                               cost: Catalog.garageCost, owned: save.hasGarage) { $0.hasGarage = true })
             build.append(gear("Capsule Catcher", "Catches capsules fired by J.O.O.N.A.S.", cost: Catalog.catcherCost,
                               owned: save.hasCatcher) { $0.hasCatcher = true })
@@ -905,6 +905,9 @@ final class GameViewController: UIViewController {
         snap.playerYaw = player.yaw
         snap.waypoint = save.hasWaypoint ? SIMD2<Float>(save.waypointX, save.waypointZ) : nil
         snap.canTeleport = !driving
+        snap.money = save.money
+        snap.hasBuildTool = save.hasBuildTool
+        snap.stationCost = Catalog.stationBaseCost * save.stationsFound.filter { $0 }.count
         map.snapshot = snap
         map.onWaypoint = { [weak self] w in
             guard let self = self else { return }
@@ -924,6 +927,22 @@ final class GameViewController: UIViewController {
             Sfx.shared.play("launch", volume: 0.6)
             self.resume()
             self.toast("Teleported to Station \(String(format: "%02d", i + 1)) · \(Hex.names[i])")
+        }
+        map.onBuild = { [weak self] i in
+            guard let self = self else { return }
+            let cost = Catalog.stationBaseCost * self.save.stationsFound.filter { $0 }.count
+            self.resume()
+            guard self.save.hasBuildTool, self.save.money >= Double(cost), !self.save.stationsFound[i] else {
+                Sfx.shared.play("deny")
+                return
+            }
+            self.save.money -= Double(cost)
+            self.save.stationsFound[i] = true
+            self.structures.refresh(self.save, dust: self.dust)
+            self.writeSave()
+            Sfx.shared.play("claim")
+            self.buzz(1)
+            self.toast("Station \(String(format: "%02d", i + 1)) built in \(Hex.names[i]). Selling, upgrades and teleport are online there.", duration: 4)
         }
         map.onClose = { [weak self] in self?.resume() }
         present(map, animated: true)
@@ -1144,16 +1163,8 @@ final class GameViewController: UIViewController {
     /// Twice a second: discoveries, sector completion, night hints.
     private func slowChecks() {
         let pp = SIMD2<Float>(player.position.x, player.position.z)
-        structures.lightStation(Hex.nearest(pp.x, pp.y))
-        for (i, s) in structures.stationPos.enumerated() where !save.stationsFound[i] {
-            if simd_length(pp - SIMD2<Float>(s.x, s.z)) < 16 {
-                save.stationsFound[i] = true
-                structures.refresh(save, dust: dust)
-                Sfx.shared.play("claim")
-                let n = save.stationsFound.filter { $0 }.count
-                toast("Station \(String(format: "%02d", i + 1)) discovered — selling, upgrades and fast travel online.  (\(n)/12)", duration: 3.5)
-            }
-        }
+        let nearest = Hex.nearest(pp.x, pp.y)
+        structures.lightStation(save.stationsFound[nearest] ? nearest : Hex.home)
         for i in 0..<Hex.count where !save.sectorsDone[i] && dust.sectorClean(i) >= 0.99 {
             save.sectorsDone[i] = true
             save.money += Double(Catalog.sectorReward)

@@ -194,17 +194,19 @@ enum Make {
         return g
     }
 
-    /// Fixed (non-billboard) sign text, centred, facing +Z.
+    /// Fixed (non-billboard) sign text, centred on the returned node, facing +Z.
     static func sign(_ text: String, size: CGFloat, color: UIColor) -> SCNNode {
         let t = SCNText(string: text, extrusionDepth: 0.02)
         t.font = UIFont.systemFont(ofSize: size, weight: .black)
         t.flatness = 0.1
         t.materials = [Mat.glow(color)]
-        let node = SCNNode(geometry: t)
-        let (minB, maxB) = node.boundingBox
-        node.pivot = SCNMatrix4MakeTranslation((maxB.x + minB.x) / 2, (maxB.y + minB.y) / 2, 0)
-        node.castsShadow = false
-        return node
+        let textNode = SCNNode(geometry: t)
+        let (minB, maxB) = textNode.boundingBox
+        textNode.position = SCNVector3(-(maxB.x + minB.x) / 2, -(maxB.y + minB.y) / 2, 0)
+        textNode.castsShadow = false
+        let holder = SCNNode()
+        holder.addChildNode(textNode)
+        return holder
     }
 
     static func label(_ text: String, size: CGFloat = 0.42, color: UIColor = .white) -> SCNNode {

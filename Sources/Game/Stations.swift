@@ -24,6 +24,9 @@ final class Structures {
     private(set) var flagPos: [SIMD3<Float>] = []
 
     private var beacons: [SCNNode] = []
+    private var stationNodes: [[SCNNode]] = []
+    private var wallTools: [[SCNNode]] = []
+    private weak var world: MoonWorld?
     private var flagCloths: [SCNNode] = []
     private let interiorLights = SCNNode()
     private var litStation = -1
@@ -49,6 +52,7 @@ final class Structures {
     private let floorMat = Mat.solid(UIColor(white: 0.34, alpha: 1), spec: 0.3)
 
     init(world: MoonWorld) {
+        self.world = world
         for i in 0..<Hex.count {
             let c = Hex.centers[i]
             let p = SIMD3<Float>(c.x, world.height(atX: c.x, z: c.y), c.y)
@@ -85,6 +89,7 @@ final class Structures {
     /// supply wall on the left (-X), deposit intake and launcher on the right (+X).
     private func buildStation(_ i: Int, at p: SIMD3<Float>, world: MoonWorld) {
         let shell = SCNNode()
+        let signs = SCNNode()
         let H: Float = 4.2
         func put(_ g: SCNGeometry, _ m: SCNMaterial, _ x: Float, _ y: Float, _ z: Float) {
             shell.addChildNode(Make.part(g, m, x, y, z))
@@ -117,7 +122,6 @@ final class Structures {
         put(SCNCylinder(radius: 0.05, height: 4), Mat.steel, -5.5, H + 2.3, -3.5)
         // Windows (thicker than the wall so they glow on both sides).
         for z in [-2.4, 2.0] {
-            put(Make.box(0.34, 0.8, 2.2, chamfer: 0.02), Mat.warmGlow, -7, 2.4, Float(z))
             put(Make.box(0.34, 0.8, 2.2, chamfer: 0.02), Mat.warmGlow, 7, 2.4, Float(z))
         }
         // Ceiling light panels.
@@ -137,27 +141,37 @@ final class Structures {
         put(Make.box(4.4, 1.2, 0.06, chamfer: 0.02), Mat.dark, 0, 3.25, -4.82)
         let up = Make.sign("UPGRADES", size: 0.62, color: UIColor(red: 0.4, green: 0.95, blue: 1, alpha: 1))
         up.position = SCNVector3(0, 3.25, -4.76)
-        shell.addChildNode(up)
+        signs.addChildNode(up)
 
         // Supply wall: rack of brushes on the left wall.
         put(Make.box(0.12, 2.7, 5.4, chamfer: 0.02), Mat.offWhite, -6.78, 1.75, -0.5)
         put(Make.box(0.2, 0.3, 5.6, chamfer: 0.02), Mat.orange, -6.76, 3.2, -0.5)
         put(Make.box(0.5, 0.08, 5.4, chamfer: 0.01), Mat.dark, -6.6, 0.9, -0.5)
+        // Pegs for each tool; the tools themselves are added below so they can appear as you buy them.
+        var toolNodes: [SCNNode] = []
         for t in 0..<Catalog.tools.count {
+            let z = 1.6 - Float(t) * 0.84
+            let y: Float = t >= 3 ? 2.95 : 2.3
+            put(Make.box(0.14, 0.05, 0.05, chamfer: 0), Mat.dark, -6.68, y + 0.03, z)
             let holder = SCNNode()
-            holder.position = SCNVector3(-6.66, t >= 3 ? 2.95 : 2.2, 1.6 - Float(t) * 0.84)
+            holder.position = SCNVector3(-6.6, y, z)
             holder.eulerAngles.y = .pi / 2
+            let tilt = SCNNode()
+            tilt.eulerAngles.x = -.pi / 2
             let m = ToolModels.make(t)
-            m.eulerAngles.x = -.pi / 2
-            let k: Float = t >= 3 ? 1.25 : 2.6
+            let k: Float = t >= 3 ? 1.25 : 2.8
             m.scale = SCNVector3(k, k, k)
-            holder.addChildNode(m)
-            shell.addChildNode(holder)
+            tilt.addChildNode(m)
+            holder.addChildNode(tilt)
+            holder.isHidden = true
+            signs.addChildNode(holder)
+            toolNodes.append(holder)
         }
+        wallTools.append(toolNodes)
         let sw = Make.sign("SUPPLY WALL", size: 0.34, color: .white)
         sw.position = SCNVector3(-6.62, 3.2, -0.5)
         sw.eulerAngles.y = .pi / 2
-        shell.addChildNode(sw)
+        signs.addChildNode(sw)
 
         // Deposit intake: orange circular intake with a tray and a screen.
         put(SCNCylinder(radius: 0.95, height: 0.95), Mat.orange, 5.6, 0.57, -1.3)
@@ -171,19 +185,22 @@ final class Structures {
         let dep = Make.sign("DEPOSIT", size: 0.3, color: UIColor(red: 1, green: 0.6, blue: 0.2, alpha: 1))
         dep.position = SCNVector3(6.8, 2.7, -1.3)
         dep.eulerAngles.y = -.pi / 2
-        shell.addChildNode(dep)
+        signs.addChildNode(dep)
 
         // Name over the door, outside and in.
         let name = i == Hex.home ? "N STATION" : String(format: "STATION %02d", i + 1)
         let outside = Make.sign(name, size: 0.7, color: .white)
         outside.position = SCNVector3(0, 3.75, 5.2)
-        shell.addChildNode(outside)
+        signs.addChildNode(outside)
         let inside = Make.sign(name, size: 0.4, color: UIColor(white: 1, alpha: 0.9))
         inside.position = SCNVector3(0, 3.7, 4.8)
         inside.eulerAngles.y = .pi
-        shell.addChildNode(inside)
+        signs.addChildNode(inside)
 
-        add(shell.flattenedClone(), at: p)
+        let flat = shell.flattenedClone()
+        add(flat, at: p)
+        Make.noShadows(signs)
+        add(signs, at: p)
 
         // Animated bits stay separate.
         let extras = SCNNode()
@@ -205,11 +222,12 @@ final class Structures {
         beacons.append(beacon)
         Make.noShadows(extras)
         add(extras, at: p)
+        stationNodes.append([flat, signs, extras])
 
         // Collision.
         let o = SIMD2<Float>(p.x, p.z)
         func seg(_ ax: Float, _ az: Float, _ bx: Float, _ bz: Float, _ half: Float = 0.18) {
-            world.addWall(o + SIMD2<Float>(ax, az), o + SIMD2<Float>(bx, bz), half: half)
+            world.addWall(o + SIMD2<Float>(ax, az), o + SIMD2<Float>(bx, bz), half: half, group: i)
         }
         seg(-7, -5, 7, -5)
         seg(-7, -5, -7, 5)
@@ -219,7 +237,7 @@ final class Structures {
         seg(-2.1, -3.1, 2.1, -3.1, 0.45)
         seg(-6.6, -3.2, -6.6, 2.2, 0.3)
         seg(5.7, -4.2, 5.7, -2.2, 0.5)
-        world.addCollider(x: p.x + 5.6, z: p.z - 1.3, r: 0.95)
+        world.addCollider(x: p.x + 5.6, z: p.z - 1.3, r: 0.95, group: i)
     }
 
     private func buildInteriorLights() {
@@ -449,10 +467,23 @@ final class Structures {
         if s.hasCatcher { dust.clearArea(x: catcherPos.x, z: catcherPos.z, radius: 1.4) }
         if s.vacuums > 0 { dust.clearArea(x: botDock.x + 2, z: botDock.z, radius: 3.0) }
 
-        for i in 0..<beacons.count {
-            let found = i < s.stationsFound.count && s.stationsFound[i]
-            beacons[i].geometry?.materials = [found ? Mat.greenGlow : Mat.redGlow]
+        // Stations exist only once they are built (you start with just N Station).
+        var off = Set<Int>()
+        for i in 0..<stationNodes.count {
+            let built = i < s.stationsFound.count && s.stationsFound[i]
+            stationNodes[i].forEach { $0.isHidden = !built }
+            beacons[i].geometry?.materials = [Mat.greenGlow]
+            if built {
+                if i != Hex.home { dust.clearHex(x: stationPos[i].x, z: stationPos[i].z, radius: 10.75) }
+            } else {
+                off.insert(i)
+            }
+            // The supply wall shows the tools you own.
+            for (t, node) in wallTools[i].enumerated() {
+                node.isHidden = !(t < s.toolsOwned.count && s.toolsOwned[t])
+            }
         }
+        world?.disabledGroups = off
         let claimed = Mat.solid(UIColor(red: 0.15, green: 0.5, blue: 0.95, alpha: 1))
         for (i, cloth) in flagCloths.enumerated() {
             let done = i < s.flagsClaimed.count && s.flagsClaimed[i]

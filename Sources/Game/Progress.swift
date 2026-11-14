@@ -29,12 +29,12 @@ struct Perk {
 
 enum Catalog {
     static let tools: [HandTool] = [
-        HandTool(name: "Toothbrush", cost: 0, width: 0.12, capacity: 0.5, rate: 1.4, reach: 2.2),
-        HandTool(name: "Nail Brush", cost: 5, width: 0.20, capacity: 1.0, rate: 1.5, reach: 2.2),
-        HandTool(name: "Handbrush", cost: 10, width: 0.35, capacity: 1.5, rate: 1.6, reach: 2.3),
-        HandTool(name: "Household Broom", cost: 25, width: 0.60, capacity: 3.0, rate: 1.8, reach: 2.8),
-        HandTool(name: "Wide Broom", cost: 75, width: 1.00, capacity: 5.0, rate: 2.0, reach: 3.0),
-        HandTool(name: "Extra Wide Broom", cost: 150, width: 1.50, capacity: 8.0, rate: 2.2, reach: 3.2),
+        HandTool(name: "Toothbrush", cost: 0, width: 0.12, capacity: 0.5, rate: 1.4, reach: 5.5),
+        HandTool(name: "Nail Brush", cost: 5, width: 0.20, capacity: 1.0, rate: 1.5, reach: 5.5),
+        HandTool(name: "Handbrush", cost: 10, width: 0.35, capacity: 1.5, rate: 1.6, reach: 5.5),
+        HandTool(name: "Household Broom", cost: 25, width: 0.60, capacity: 3.0, rate: 1.8, reach: 6.0),
+        HandTool(name: "Wide Broom", cost: 75, width: 1.00, capacity: 5.0, rate: 2.0, reach: 6.0),
+        HandTool(name: "Extra Wide Broom", cost: 150, width: 1.50, capacity: 8.0, rate: 2.2, reach: 6.5),
     ]
 
     static let vehicles: [VehicleTier] = [
@@ -57,6 +57,7 @@ enum Catalog {
     static let flagReward = 100
     static let sectorReward = 500
     static let hexReward = 5
+    static let stationBaseCost = 600
 
     static let bootsCost = 60
     static let jetpackCost = 200

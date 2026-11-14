@@ -15,16 +15,21 @@ final class MapViewController: UIViewController {
         var playerYaw: Float = 0
         var waypoint: SIMD2<Float>?
         var canTeleport = true
+        var money: Double = 0
+        var stationCost = 0
+        var hasBuildTool = false
     }
 
     var snapshot = Snapshot()
     var onWaypoint: ((SIMD2<Float>?) -> Void)?
     var onTeleport: ((Int) -> Void)?
+    var onBuild: ((Int) -> Void)?
     var onClose: (() -> Void)?
 
     private let canvas = MapCanvas()
     private let info = UILabel()
     private let teleportButton = UIButton(type: .system)
+    private let buildButton = UIButton(type: .system)
     private let clearButton = UIButton(type: .system)
     private var selected: Int?
 
@@ -48,7 +53,7 @@ final class MapViewController: UIViewController {
         info.numberOfLines = 0
         info.font = .systemFont(ofSize: 13, weight: .semibold)
         info.textColor = UIColor(white: 1, alpha: 0.85)
-        info.text = "Tap the map to drop a waypoint.\nTap a green station to teleport there."
+        info.text = "Tap the map to drop a waypoint.\nTap a station marker to teleport there, or to build one."
 
         func style(_ b: UIButton, _ text: String, _ color: UIColor) {
             b.setTitle(text, for: .normal)
@@ -63,6 +68,12 @@ final class MapViewController: UIViewController {
         teleportButton.addAction(UIAction { [weak self] _ in
             guard let self = self, let s = self.selected else { return }
             self.dismiss(animated: true) { self.onTeleport?(s) }
+        }, for: .touchUpInside)
+        style(buildButton, "BUILD STATION", UIColor(red: 0.45, green: 1, blue: 0.55, alpha: 1))
+        buildButton.isHidden = true
+        buildButton.addAction(UIAction { [weak self] _ in
+            guard let self = self, let s = self.selected else { return }
+            self.dismiss(animated: true) { self.onBuild?(s) }
         }, for: .touchUpInside)
         style(clearButton, "CLEAR WAYPOINT", UIColor(red: 1, green: 0.8, blue: 0.25, alpha: 1))
         clearButton.isHidden = snapshot.waypoint == nil
@@ -90,7 +101,7 @@ final class MapViewController: UIViewController {
         stats.text = String(format: "Moon cleaned  %.2f%%\nStations  %d / 12\nFlags  %d / %d", total * 100, found, flags, snapshot.flagsClaimed.count)
 
         let spacer = UIView()
-        let side = UIStackView(arrangedSubviews: [title, stats, info, spacer, teleportButton, clearButton, close])
+        let side = UIStackView(arrangedSubviews: [title, stats, info, spacer, teleportButton, buildButton, clearButton, close])
         side.axis = .vertical
         side.spacing = 12
         side.translatesAutoresizingMaskIntoConstraints = false
@@ -118,10 +129,28 @@ final class MapViewController: UIViewController {
                 selected = i
                 let found = i < snapshot.stationsFound.count && snapshot.stationsFound[i]
                 let pct = i < snapshot.sectorClean.count ? snapshot.sectorClean[i] * 100 : 0
-                info.text = String(format: "STATION %02d\n%@\n%.1f%% clean", i + 1, Hex.names[i], pct)
-                    + (found ? "" : "\nNot discovered yet — walk there first.")
-                    + (found && !snapshot.canTeleport ? "\nLeave your vehicle to teleport." : "")
-                teleportButton.isHidden = !(found && snapshot.canTeleport)
+                var text = String(format: "SECTOR %02d\n%@\n%.1f%% clean", i + 1, Hex.names[i], pct)
+                teleportButton.isHidden = true
+                buildButton.isHidden = true
+                if found {
+                    if snapshot.canTeleport {
+                        teleportButton.isHidden = false
+                    } else {
+                        text += "\nLeave your vehicle to teleport."
+                    }
+                } else {
+                    text += "\nNo station here yet. A station lets you sell, upgrade and teleport in this sector."
+                    if !snapshot.hasBuildTool {
+                        text += "\nNeeds the Building Tool (Supply Wall, $50)."
+                    } else {
+                        buildButton.isHidden = false
+                        let afford = snapshot.money >= Double(snapshot.stationCost)
+                        buildButton.setTitle("BUILD  $\(snapshot.stationCost)", for: .normal)
+                        buildButton.isEnabled = afford
+                        buildButton.alpha = afford ? 1 : 0.4
+                    }
+                }
+                info.text = text
                 canvas.selected = i
                 canvas.setNeedsDisplay()
                 return
@@ -132,6 +161,7 @@ final class MapViewController: UIViewController {
         selected = nil
         canvas.selected = nil
         teleportButton.isHidden = true
+        buildButton.isHidden = true
         snapshot.waypoint = w
         canvas.snapshot = snapshot
         canvas.setNeedsDisplay()
@@ -228,7 +258,7 @@ final class MapCanvas: UIView {
                 if k == 0 { hex.move(to: q) } else { hex.addLine(to: q) }
             }
             hex.close()
-            (found ? UIColor(red: 0.3, green: 1, blue: 0.55, alpha: 1) : UIColor(red: 0.9, green: 0.25, blue: 0.2, alpha: 1)).setFill()
+            (found ? UIColor(red: 0.3, green: 1, blue: 0.55, alpha: 1) : UIColor(white: 0.25, alpha: 0.55)).setFill()
             hex.fill()
             UIColor.black.setStroke()
             hex.lineWidth = 1.5

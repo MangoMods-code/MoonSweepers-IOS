@@ -202,6 +202,15 @@ final class Player {
             prev = p
             t += 0.08
         }
+        // Looking out toward the horizon: clean at full reach instead of nothing.
+        if d.y < 0.35 {
+            let flat = SIMD2<Float>(d.x, d.z)
+            let len = simd_length(flat)
+            if len > 0.001 {
+                let q = SIMD2<Float>(o.x, o.z) + flat / len * reach
+                return SIMD3<Float>(q.x, world.height(atX: q.x, z: q.y), q.y)
+            }
+        }
         return nil
     }
 }
